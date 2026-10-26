@@ -1,5 +1,9 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
 <title>Homewall Boulder</title>
-<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
 <style>
 /* Layout: one-column phone app. Header bar, filterable list of boulders, full-width wall photo with round hold markers on top. */
@@ -8,6 +12,7 @@
   --accent:#e0245e; --accent-fg:#ffffff;
   --c-start:#ff2d78; --c-hand:#2bb3f0; --c-foot:#f5c400; --ok:#1c9a5a;
   --f-display:"Barlow Condensed","Arial Narrow",sans-serif; --f-body:"Barlow",system-ui,sans-serif;
+  color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#12151a; --surface:#1b2028; --fg:#eef1f5; --muted:#9aa3b2; --line:#2c3440;
@@ -16,8 +21,11 @@
   --bg:#12151a; --surface:#1b2028; --fg:#eef1f5; --muted:#9aa3b2; --line:#2c3440;
   --accent:#ff4f86; --accent-fg:#14181f; --ok:#3ccf86; color-scheme:dark}
 *{box-sizing:border-box}
-body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:16px;line-height:1.4;
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:16px;line-height:1.4;
   padding-block:0 32px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+img{max-width:100%}
+[hidden]{display:none!important}
 .app{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
 .vh{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none}
 header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:16px}
@@ -71,6 +79,8 @@ input[type=text],select{min-height:44px;border-radius:10px;border:1px solid var(
 .xbtn{border:0;background:none;color:var(--muted);min-width:44px;min-height:44px;cursor:pointer;font-size:14px}
 @media (max-width:420px){.filters{grid-template-columns:1fr 1fr}.filters .field:last-child{grid-column:1/-1}}
 </style>
+</head>
+<body>
 <input type="file" id="fgal" class="vh" accept="image/*" tabindex="-1">
 <input type="file" id="fcam" class="vh" accept="image/*" capture="environment" tabindex="-1">
 <div class="app" id="app"></div>
@@ -80,8 +90,8 @@ var APP=document.getElementById('app');
 var GRADES=[1,2,3,4,5,6,7,8,9,10];
 var COL={start:'var(--c-start)',hand:'var(--c-hand)',foot:'var(--c-foot)'};
 var LABEL={start:'Start/Ziel',hand:'Hand',foot:'Fuß'};
-var state={wall:null,boulders:[],me:'',view:'list',cur:null,draft:null,sel:null,tool:'start',r:3.4,
-  f:{gmin:1,gmax:10,st:'all'},persist:true,err:'',code:'',role:'',share:'',legacy:null,loading:true,offline:false};
+var state={wall:null,boulders:[],legacyB:[],legacy:null,me:'',view:'list',cur:null,draft:null,sel:null,tool:'start',r:3.4,
+  f:{gmin:1,gmax:10,st:'all'},persist:true,err:'',code:'',role:'',share:'',device:'',loading:true,offline:false,busy:false};
 
 /* ---------- Supabase (public values; protection lives in the database rules) ---------- */
 var SB_URL='https://ldangrtzwevbkeotkcmi.supabase.co';
@@ -95,10 +105,21 @@ function loadRemote(){
   if(!state.code){state.role='none';return Promise.resolve()}
   return rpc('get_wall',{p_code:state.code}).then(function(r){
     state.role=r.role||'none';state.offline=false;
-    if(state.role==='none'){state.wall=null;return kvSet('wallRemote',null)}
+    if(state.role==='none'){state.wall=null;state.boulders=[];return Promise.all([kvSet('wallRemote',null),kvSet('cloudBoulders',[])])}
     state.share=r.share_code||'';
     if(r.photo){state.wall={photo:r.photo,w:r.width,h:r.height};return kvSet('wallRemote',state.wall)}
     state.wall=null;
+  });
+}
+function reload(){
+  return rpc('get_all',{p_code:state.code}).then(function(r){
+    if(r.role==='none')return;
+    state.boulders=r.boulders||[];state.offline=false;
+    if(state.cur){
+      state.cur=state.boulders.filter(function(b){return b.id===state.cur.id})[0]||null;
+      if(!state.cur&&state.view==='show')state.view='list';
+    }
+    return kvSet('cloudBoulders',state.boulders);
   });
 }
 function uploadWall(p){
@@ -108,8 +129,15 @@ function uploadWall(p){
     state.wall=p;state.err='';return kvSet('wallRemote',p);
   });
 }
+function fail(m){state.err=(m&&m.message)||'Das hat nicht geklappt.';state.busy=false;render()}
+function act(p){
+  return p.then(function(r){
+    if(r&&r.ok===false)throw new Error(r.error==='forbidden'?'Das darfst du nicht.':'Der Server hat die Änderung abgelehnt.');
+    return reload();
+  }).then(function(){state.err='';render()}).catch(fail);
+}
 
-/* ---------- storage: IndexedDB, falls back to memory ---------- */
+/* ---------- local storage: IndexedDB, falls back to memory ---------- */
 var db=null,mem={};
 function openDB(){return new Promise(function(res){
   try{var r=indexedDB.open('homewall',1);
@@ -124,7 +152,7 @@ function kvGet(k){return new Promise(function(res){
 function kvSet(k,v){mem[k]=v;return new Promise(function(res){
   if(!db)return res();
   try{var t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=res;t.onerror=function(){state.persist=false;res()}}catch(e){state.persist=false;res()}});}
-function save(){return Promise.all([kvSet('boulders',state.boulders),kvSet('me',state.me),kvSet('r',state.r)]);}
+function save(){return Promise.all([kvSet('me',state.me),kvSet('r',state.r)]);}
 
 /* ---------- helpers ---------- */
 function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
@@ -141,8 +169,8 @@ function wallHTML(holds,editMode,sel){
   return '<div class="stage'+(editMode?' edit':'')+'" id="stage"><img src="'+w.photo+'" alt="Foto der Homewall"><svg id="ov" viewBox="'+vb+'" preserveAspectRatio="none">'+holdsSVG(holds,editMode?sel:null)+'</svg></div>';
 }
 function legend(){return '<div class="legend"><span>'+dot('start')+'Start/Ziel</span><span>'+dot('hand')+'Hand</span><span>'+dot('foot')+'Fuß</span></div>';}
-function who(){return state.me||'ich'}
-function sentBy(b){return !!(b.sent&&b.sent[who()]);}
+function sentBy(b){return !!(state.me&&b.sent&&b.sent[state.me]);}
+function canEdit(b){return state.role==='owner'||b.dev===state.device;}
 function nextName(){var n=1,names={};state.boulders.forEach(function(b){names[b.name]=1});while(names['Boulder '+n])n++;return 'Boulder '+n;}
 function fmt(d){try{return new Date(d).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit'})}catch(e){return ''}}
 
@@ -162,8 +190,7 @@ function onPhoto(e){
   var inp=e.target,f=inp.files&&inp.files[0];if(!f)return;
   if(state.role!=='owner'){inp.value='';return}
   loadPhoto(f).catch(function(){throw new Error('Das Foto konnte nicht gelesen werden. Bitte ein anderes Bild wählen.')})
-  .then(uploadWall).then(render)
-  .catch(function(m){state.err=(m&&m.message)||'Fehler beim Hochladen.';render()});
+  .then(uploadWall).then(render).catch(fail);
   inp.value='';
 }
 document.getElementById('fgal').onchange=onPhoto;
@@ -185,7 +212,7 @@ function render(){
   if(state.view==='show')return viewShow();
   if(state.view==='edit')return viewEdit();
 }
-function top(title,right){return '<header><h1>'+title+'</h1><div class="row">'+(right||'')+'</div></header>'+(state.err?'<div class="warn">'+esc(state.err)+'</div>':'')+(state.persist?'':'<div class="warn">Speichern im Browser ist hier nicht möglich. Daten gehen beim Schließen verloren.</div>')+(state.offline?'<div class="warn">Keine Verbindung zum Server. Es wird das zuletzt geladene Wandfoto gezeigt.</div>':'');}
+function top(title,right){return '<header><h1>'+title+'</h1><div class="row">'+(right||'')+'</div></header>'+(state.err?'<div class="warn">'+esc(state.err)+'</div>':'')+(state.persist?'':'<div class="warn">Speichern im Browser ist hier nicht möglich. Daten gehen beim Schließen verloren.</div>')+(state.offline?'<div class="warn">Keine Verbindung zum Server. Es wird der zuletzt geladene Stand gezeigt. Änderungen sind jetzt nicht möglich.</div>':'');}
 
 function viewSetup(){
   if(state.role!=='owner')return viewMsg('Noch kein Wandfoto','Der Besitzer hat noch kein Foto der Wand hochgeladen. Bitte später nochmal öffnen.');
@@ -194,7 +221,7 @@ function viewSetup(){
   '<p class="muted" style="margin:0">Fotografiere deine Wand frontal und bei gutem Licht. Das Foto wird in der Cloud gespeichert und ist für alle mit Teilen-Link sichtbar. Nur du kannst es ändern.</p>'+
   '<div class="row">'+photoButtons(true)+(state.legacy?'<button class="btn" id="legacy">Altes Foto von diesem Gerät hochladen</button>':'')+'</div></div>';
   var lg=document.getElementById('legacy');
-  if(lg)lg.onclick=function(){uploadWall(state.legacy).then(render).catch(function(m){state.err=(m&&m.message)||'Fehler beim Hochladen.';render()})};
+  if(lg)lg.onclick=function(){uploadWall(state.legacy).then(render).catch(fail)};
 }
 function copyFrom(id,btn){
   var i=document.getElementById(id);i.focus();i.select();
@@ -217,8 +244,24 @@ function wireOwner(){
     rpc('rotate_share',{p_code:state.code}).then(function(r){
       if(!r||!r.ok)throw new Error('Das Erneuern ist fehlgeschlagen.');
       state.share=r.share_code;state.err='';render();
-    }).catch(function(m){state.err=(m&&m.message)||'Das Erneuern ist fehlgeschlagen.';render()});
+    }).catch(fail);
   };
+}
+
+function migrate(){
+  if(!state.me){state.err='Trage zuerst oben deinen Namen ein.';return render()}
+  state.err='Alte Boulder werden übernommen …';render();
+  var chain=Promise.resolve();
+  state.legacyB.slice().forEach(function(b){chain=chain.then(function(){
+    return rpc('save_boulder',{p_code:state.code,p_id:null,p_name:b.name,p_grade:b.grade,p_holds:b.holds,p_author:state.me,p_device:state.device}).then(function(r){
+      if(!r||!r.ok)throw new Error('Übernahme fehlgeschlagen bei „'+b.name+'“.');
+      var q=Promise.resolve();
+      Object.keys(b.sent||{}).forEach(function(p){q=q.then(function(){return rpc('set_sent',{p_code:state.code,p_id:r.id,p_person:p==='ich'?state.me:p,p_sent:true})})});
+      (b.comments||[]).forEach(function(c){q=q.then(function(){return rpc('add_comment',{p_code:state.code,p_id:r.id,p_author:(c.a==='ich'?state.me:c.a)||state.me,p_device:state.device,p_body:c.t})})});
+      return q;
+    });
+  })});
+  chain.then(function(){state.legacyB=[];return kvSet('boulders',[])}).then(reload).then(function(){state.err='';render()}).catch(fail);
 }
 
 function filtered(){
@@ -234,10 +277,13 @@ function gradeOpts(sel){return GRADES.map(function(g){return '<option value="'+g
 
 function viewList(){
   var bs=filtered(),all=state.boulders.length,f=state.f;
-  var h=top('Homewall','<button class="btn primary" id="new">+ Boulder</button>');
-  h+='<div class="field"><label for="me">Dein Name (für „gesendet“ und Kommentare)</label><input type="text" id="me" maxlength="30" placeholder="z. B. Robert" value="'+esc(state.me)+'"></div>';
+  var h=top('Homewall','<button class="btn primary" id="new"'+(state.offline?' disabled':'')+'>+ Boulder</button>');
+  h+='<div class="field"><label for="me">Dein Name (für Boulder, „gesendet“ und Kommentare)</label><input type="text" id="me" maxlength="30" placeholder="z. B. Robert" value="'+esc(state.me)+'"></div>';
+  if(state.legacyB.length&&!state.offline){
+    h+='<div class="card empty"><h2>Alte Boulder auf diesem Gerät</h2><p class="muted" style="margin:0">Es liegen noch '+state.legacyB.length+' Boulder aus der lokalen Version auf diesem Gerät. Sie sind für andere unsichtbar.</p><div class="row"><button class="btn primary" id="mig">In die Cloud übernehmen</button><button class="btn" id="migdel">Verwerfen</button></div></div>';
+  }
   if(!all){
-    h+='<div class="card empty"><h2>Noch kein Boulder</h2><p class="muted" style="margin:0">Lege deinen ersten Boulder an: Name, Grad und Griffe auf dem Foto markieren.</p><button class="btn primary" id="new2">Ersten Boulder anlegen</button></div>';
+    h+='<div class="card empty"><h2>Noch kein Boulder</h2><p class="muted" style="margin:0">Lege den ersten Boulder an: Name, Grad und Griffe auf dem Foto markieren.</p><button class="btn primary" id="new2"'+(state.offline?' disabled':'')+'>Ersten Boulder anlegen</button></div>';
   }else{
     var done=state.boulders.filter(sentBy).length,active=(f.gmin>1||f.gmax<10||f.st!=='all');
     h+='<div class="card filters">'+
@@ -245,27 +291,36 @@ function viewList(){
       '<div class="field"><label for="g2">bis</label><select id="g2">'+gradeOpts(f.gmax)+'</select></div>'+
       '<div class="field"><label for="st">Status</label><select id="st"><option value="all"'+(f.st==='all'?' selected':'')+'>Alle</option><option value="open"'+(f.st==='open'?' selected':'')+'>Offen</option><option value="sent"'+(f.st==='sent'?' selected':'')+'>Gesendet</option></select></div>'+
       '</div>'+
-      '<div class="row"><span class="muted grow">'+bs.length+' von '+all+' Boulder · '+done+' gesendet</span>'+(active?'<button class="btn" id="reset">Filter zurücksetzen</button>':'')+'</div>';
-    if(!bs)h+='';
+      '<div class="row"><span class="muted grow">'+bs.length+' von '+all+' Boulder · '+done+' von dir gesendet</span>'+(active?'<button class="btn" id="reset">Filter zurücksetzen</button>':'')+'</div>';
     if(!bs.length)h+='<div class="card empty"><p class="muted" style="margin:0">Kein Boulder passt zum Filter.</p></div>';
     else{
       h+='<ul class="list">';
       bs.forEach(function(b){
-        var nc=(b.comments||[]).length;
-        h+='<li><button class="card item" data-id="'+b.id+'"><span class="grade">'+b.grade+'</span><span class="grow"><span class="name">'+esc(b.name)+'</span>'+(nc?'<br><span class="muted">'+nc+' Kommentar'+(nc>1?'e':'')+'</span>':'')+'</span><span class="badge'+(sentBy(b)?' ok':'')+'">'+(sentBy(b)?'gesendet':'offen')+'</span></button></li>';});
+        var nc=(b.comments||[]).length,sub=(b.author?'von '+esc(b.author):'')+(nc?(b.author?' · ':'')+nc+' Kommentar'+(nc>1?'e':''):'');
+        h+='<li><button class="card item" data-id="'+b.id+'"><span class="grade">'+b.grade+'</span><span class="grow"><span class="name">'+esc(b.name)+'</span>'+(sub?'<br><span class="muted">'+sub+'</span>':'')+'</span><span class="badge'+(sentBy(b)?' ok':'')+'">'+(sentBy(b)?'gesendet':'offen')+'</span></button></li>';});
       h+='</ul>';
     }
   }
   if(state.role==='owner'){
     h+='<div class="row">'+(photoButtons(false).replace('Foto aufnehmen','Wandfoto neu aufnehmen').replace('Aus Galerie wählen','Wandfoto aus Galerie'))+'</div><p class="note">Beim Wechsel des Wandfotos passen vorhandene Boulder nicht mehr zum neuen Foto.</p>'+ownerPanel();
   }
-  h+='<p class="note">Grad 1 bis 10. Das Wandfoto liegt in der Cloud. Boulder, Sendestatus und Kommentare liegen noch nur auf diesem Gerät. Das Teilen kommt in Schritt 2b.</p>';
+  h+='<p class="note">Grad 1 bis 10. Wandfoto, Boulder, Sendestatus und Kommentare liegen in der Cloud und sind für alle mit Teilen-Link sichtbar. Die Liste aktualisiert sich alle 30 Sekunden.</p>';
   APP.innerHTML=h;
   if(state.role==='owner')wireOwner();
   var n=document.getElementById('new'),n2=document.getElementById('new2');
-  function start(){state.draft={id:uid(),name:nextName(),grade:5,holds:[],sent:{},comments:[],author:who()};state.isNew=true;state.sel=null;state.err='';state.view='edit';render();}
+  function start(){
+    if(!state.me){state.err='Bitte trage zuerst oben deinen Namen ein.';render();var m=document.getElementById('me');if(m)m.focus();return}
+    state.draft={id:null,name:nextName(),grade:5,holds:[]};state.isNew=true;state.sel=null;state.err='';state.view='edit';render();
+  }
   n.onclick=start;if(n2)n2.onclick=start;
-  document.getElementById('me').onchange=function(e){state.me=e.target.value.trim();save().then(render)};
+  document.getElementById('me').onchange=function(e){state.me=e.target.value.trim();state.err='';save().then(render)};
+  var mg=document.getElementById('mig');
+  if(mg){mg.onclick=migrate;
+    var md=document.getElementById('migdel');
+    md.onclick=function(){
+      if(!md.dataset.sure){md.dataset.sure=1;md.textContent='Wirklich verwerfen?';setTimeout(function(){if(md.isConnected){delete md.dataset.sure;md.textContent='Verwerfen'}},4000);return}
+      state.legacyB=[];kvSet('boulders',[]).then(render)};
+  }
   var g1=document.getElementById('g1');
   if(g1){
     g1.onchange=function(e){f.gmin=+e.target.value;if(f.gmax<f.gmin)f.gmax=f.gmin;render()};
@@ -278,31 +333,41 @@ function viewList(){
 }
 
 function viewShow(){
-  var b=state.cur;b.comments=b.comments||[];
-  var cm=b.comments.length?b.comments.map(function(c){
-    return '<div class="cm"><div class="grow"><small>'+esc(c.a)+' · '+fmt(c.d)+'</small><p>'+esc(c.t)+'</p></div>'+(c.a===who()?'<button class="xbtn" data-c="'+c.id+'" aria-label="Kommentar löschen">Löschen</button>':'')+'</div>';
+  var b=state.cur;if(!b){state.view='list';return render()}
+  var comments=b.comments||[],can=canEdit(b),named=!!state.me,off=state.offline;
+  var cm=comments.length?comments.map(function(c){
+    var del=(state.role==='owner'||c.dev===state.device);
+    return '<div class="cm"><div class="grow"><small>'+esc(c.a)+' · '+fmt(c.d)+'</small><p>'+esc(c.t)+'</p></div>'+(del&&!off?'<button class="xbtn" data-c="'+c.id+'" aria-label="Kommentar löschen">Löschen</button>':'')+'</div>';
   }).join(''):'<p class="muted" style="margin:0">Noch keine Kommentare. Schreibe einen Tipp zur Beta oder zum Schwierigkeitsgrad.</p>';
+  var sentList=Object.keys(b.sent||{});
   APP.innerHTML=top('<span class="grade" style="display:inline-grid;margin-right:8px;vertical-align:middle">'+b.grade+'</span>'+esc(b.name))+
+  (b.author?'<p class="muted" style="margin:0">von '+esc(b.author)+'</p>':'')+
   wallHTML(b.holds,false)+legend()+
-  '<label class="card check"><input type="checkbox" id="sent"'+(sentBy(b)?' checked':'')+'><span class="grow">Gesendet'+(state.me?' ('+esc(state.me)+')':'')+'</span></label>'+
+  '<label class="card check"><input type="checkbox" id="sent"'+(sentBy(b)?' checked':'')+((named&&!off)?'':' disabled')+'><span class="grow">Gesendet'+(named?' ('+esc(state.me)+')':'')+'</span></label>'+
+  (sentList.length?'<p class="muted" style="margin:0">Gesendet von: '+sentList.map(esc).join(', ')+'</p>':'')+
+  (named?'':'<p class="note" style="margin:0">Trage zuerst auf der Startseite deinen Namen ein, um zu senden oder zu kommentieren.</p>')+
   '<div class="card comments"><h2>Kommentare</h2>'+cm+
-  '<div class="row" style="flex-wrap:nowrap"><input type="text" id="cin" class="grow" maxlength="500" placeholder="Kommentar schreiben"><button class="btn primary" id="csend">Senden</button></div></div>'+
-  '<div class="row"><button class="btn" id="back">Zurück</button><button class="btn primary" id="edit">Bearbeiten</button><button class="btn danger" id="del">Löschen</button></div>';
+  '<div class="row" style="flex-wrap:nowrap"><input type="text" id="cin" class="grow" maxlength="500" placeholder="Kommentar schreiben"'+((named&&!off)?'':' disabled')+'><button class="btn primary" id="csend"'+((named&&!off)?'':' disabled')+'>Senden</button></div></div>'+
+  '<div class="row"><button class="btn" id="back">Zurück</button>'+(can&&!off?'<button class="btn primary" id="edit">Bearbeiten</button><button class="btn danger" id="del">Löschen</button>':'')+'</div>'+
+  (can?'':'<p class="note">Bearbeiten und Löschen kann nur, wer den Boulder angelegt hat, und der Besitzer.</p>');
   document.getElementById('back').onclick=function(){state.view='list';render()};
   document.getElementById('sent').onchange=function(e){
-    var k=who();b.sent=b.sent||{};if(e.target.checked)b.sent[k]=new Date().toISOString().slice(0,10);else delete b.sent[k];
-    save().then(render)};
-  function send(){var i=document.getElementById('cin'),t=i.value.trim();if(!t)return;
-    b.comments.push({id:uid(),a:who(),t:t,d:new Date().toISOString()});save().then(render)}
+    act(rpc('set_sent',{p_code:state.code,p_id:b.id,p_person:state.me,p_sent:e.target.checked}));
+  };
+  function send(){var i=document.getElementById('cin'),t=i.value.trim();if(!t||state.busy)return;state.busy=true;
+    act(rpc('add_comment',{p_code:state.code,p_id:b.id,p_author:state.me,p_device:state.device,p_body:t}).then(function(r){state.busy=false;return r}))}
   document.getElementById('csend').onclick=send;
   document.getElementById('cin').onkeydown=function(e){if(e.key==='Enter')send()};
   [].forEach.call(APP.querySelectorAll('.xbtn'),function(x){x.onclick=function(){
-    b.comments=b.comments.filter(function(c){return c.id!==x.dataset.c});save().then(render)}});
-  document.getElementById('edit').onclick=function(){state.draft=JSON.parse(JSON.stringify(b));state.isNew=false;state.sel=null;state.view='edit';render()};
-  document.getElementById('del').onclick=function(){
-    var d=document.getElementById('del');
-    if(d.dataset.sure){state.boulders=state.boulders.filter(function(x){return x.id!==b.id});save().then(function(){state.view='list';render()});}
-    else{d.dataset.sure=1;d.textContent='Wirklich löschen?';setTimeout(function(){if(d.isConnected){delete d.dataset.sure;d.textContent='Löschen'}},4000)}};
+    act(rpc('delete_comment',{p_code:state.code,p_id:x.dataset.c,p_device:state.device}))}});
+  var ed=document.getElementById('edit');
+  if(ed){
+    ed.onclick=function(){state.draft=JSON.parse(JSON.stringify({id:b.id,name:b.name,grade:b.grade,holds:b.holds}));state.isNew=false;state.sel=null;state.view='edit';render()};
+    document.getElementById('del').onclick=function(){
+      var d=document.getElementById('del');
+      if(d.dataset.sure){act(rpc('delete_boulder',{p_code:state.code,p_id:b.id,p_device:state.device}))}
+      else{d.dataset.sure=1;d.textContent='Wirklich löschen?';setTimeout(function(){if(d.isConnected){delete d.dataset.sure;d.textContent='Löschen'}},4000)}};
+  }
 }
 
 function selHold(){var d=state.draft;return d.holds.filter(function(x){return x.id===state.sel})[0]||null}
@@ -336,11 +401,16 @@ function viewEdit(){
     d.name=nm.value.trim();
     if(!d.name){state.err='Bitte einen Namen eingeben.';render();var n=document.getElementById('nm');if(n)n.focus();return}
     if(!d.holds.length){state.err='Bitte mindestens einen Griff setzen.';render();return}
-    state.err='';
-    if(state.isNew)state.boulders.push(d);
-    else state.boulders=state.boulders.map(function(x){return x.id===d.id?d:x});
-    state.cur=d;state.draft=null;
-    save().then(function(){state.view='show';render()});};
+    if(state.busy)return;
+    state.busy=true;this.disabled=true;this.textContent='Speichert …';
+    rpc('save_boulder',{p_code:state.code,p_id:state.isNew?null:d.id,p_name:d.name,p_grade:d.grade,p_holds:d.holds,p_author:state.me,p_device:state.device}).then(function(r){
+      if(!r||!r.ok)throw new Error(r&&r.error==='forbidden'?'Das darfst du nicht.':'Der Server hat den Boulder abgelehnt.');
+      return reload().then(function(){
+        state.cur=state.boulders.filter(function(b){return b.id===r.id})[0]||null;
+        state.draft=null;state.busy=false;state.err='';state.view=state.cur?'show':'list';render();
+      });
+    }).catch(fail);
+  };
   bindPointer(d);
 }
 
@@ -362,15 +432,31 @@ function bindPointer(d){
   ov.onpointercancel=function(){drag=null;render()};
 }
 
+/* ---------- periodic refresh (every 30 s and when the page comes back to the foreground) ---------- */
+function softRefresh(){
+  if(!state.code||state.role==='none'||!state.role||state.view==='edit'||document.hidden||state.busy)return;
+  reload().then(function(){
+    var ae=document.activeElement;
+    var typing=ae&&((ae.tagName==='INPUT'&&ae.type==='text')||ae.tagName==='SELECT');
+    if(!typing)render();
+  }).catch(function(){});
+}
+setInterval(softRefresh,30000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)softRefresh()});
+
 /* ---------- boot ---------- */
-openDB().then(function(){return Promise.all([kvGet('wallRemote'),kvGet('wall'),kvGet('boulders'),kvGet('me'),kvGet('r'),kvGet('code')])}).then(function(v){
+openDB().then(function(){return Promise.all([kvGet('wallRemote'),kvGet('wall'),kvGet('boulders'),kvGet('me'),kvGet('r'),kvGet('code'),kvGet('cloudBoulders'),kvGet('device')])}).then(function(v){
   var hash=(location.hash||'').replace(/^#/,'').replace(/[^A-Za-z0-9]/g,'');
-  state.wall=v[0]||null;state.legacy=v[1]||null;state.boulders=v[2]||[];state.me=v[3]||'';state.r=v[4]||3.4;
+  state.wall=v[0]||null;state.legacy=v[1]||null;state.legacyB=v[2]||[];state.me=v[3]||'';state.r=v[4]||3.4;
+  state.boulders=v[6]||[];
+  state.device=v[7]||(uid()+uid());if(!v[7])kvSet('device',state.device);
   if(hash.length>=32){state.code=hash;kvSet('code',hash)}else state.code=v[5]||'';
   render();
-  return loadRemote().catch(function(){
+  return loadRemote().then(function(){if(state.role!=='none')return reload()}).catch(function(){
     state.offline=true;state.role=state.wall?'member':'none';
   });
 }).then(function(){state.loading=false;render()}).catch(function(){state.loading=false;render()});
 })();
 </script>
+</body>
+</html>
