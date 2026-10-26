@@ -81,7 +81,33 @@ var GRADES=[1,2,3,4,5,6,7,8,9,10];
 var COL={start:'var(--c-start)',hand:'var(--c-hand)',foot:'var(--c-foot)'};
 var LABEL={start:'Start/Ziel',hand:'Hand',foot:'Fuß'};
 var state={wall:null,boulders:[],me:'',view:'list',cur:null,draft:null,sel:null,tool:'start',r:3.4,
-  f:{gmin:1,gmax:10,st:'all'},persist:true,err:''};
+  f:{gmin:1,gmax:10,st:'all'},persist:true,err:'',code:'',role:'',share:'',legacy:null,loading:true,offline:false};
+
+/* ---------- Supabase (public values; protection lives in the database rules) ---------- */
+var SB_URL='https://ldangrtzwevbkeotkcmi.supabase.co';
+var SB_KEY='sb_publishable_iPr0rVHDuRqxApn6UCj1bQ_7NQTvtCD';
+function rpc(fn,args){
+  return fetch(SB_URL+'/rest/v1/rpc/'+fn,{method:'POST',headers:{'apikey':SB_KEY,'Content-Type':'application/json'},body:JSON.stringify(args)})
+  .catch(function(){throw new Error('Keine Verbindung zum Server.')})
+  .then(function(r){if(!r.ok)throw new Error('Server-Fehler '+r.status);return r.json()});
+}
+function loadRemote(){
+  if(!state.code){state.role='none';return Promise.resolve()}
+  return rpc('get_wall',{p_code:state.code}).then(function(r){
+    state.role=r.role||'none';state.offline=false;
+    if(state.role==='none'){state.wall=null;return kvSet('wallRemote',null)}
+    state.share=r.share_code||'';
+    if(r.photo){state.wall={photo:r.photo,w:r.width,h:r.height};return kvSet('wallRemote',state.wall)}
+    state.wall=null;
+  });
+}
+function uploadWall(p){
+  state.err='Foto wird hochgeladen …';render();
+  return rpc('set_wall',{p_code:state.code,p_photo:p.photo,p_width:p.w,p_height:p.h}).then(function(r){
+    if(!r||!r.ok)throw new Error(r&&r.error==='forbidden'?'Nur mit dem Besitzer-Link darf das Wandfoto geändert werden.':'Der Server hat das Foto abgelehnt.');
+    state.wall=p;state.err='';return kvSet('wallRemote',p);
+  });
+}
 
 /* ---------- storage: IndexedDB, falls back to memory ---------- */
 var db=null,mem={};
@@ -98,7 +124,7 @@ function kvGet(k){return new Promise(function(res){
 function kvSet(k,v){mem[k]=v;return new Promise(function(res){
   if(!db)return res();
   try{var t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=res;t.onerror=function(){state.persist=false;res()}}catch(e){state.persist=false;res()}});}
-function save(){return Promise.all([kvSet('wall',state.wall),kvSet('boulders',state.boulders),kvSet('me',state.me),kvSet('r',state.r)]);}
+function save(){return Promise.all([kvSet('boulders',state.boulders),kvSet('me',state.me),kvSet('r',state.r)]);}
 
 /* ---------- helpers ---------- */
 function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
@@ -134,8 +160,10 @@ function loadPhoto(file){return new Promise(function(res,rej){
   r.readAsDataURL(file);});}
 function onPhoto(e){
   var inp=e.target,f=inp.files&&inp.files[0];if(!f)return;
-  loadPhoto(f).then(function(p){state.wall=p;state.err='';return save()}).then(render)
-  .catch(function(){state.err='Das Foto konnte nicht gelesen werden. Bitte ein anderes Bild wählen.';render()});
+  if(state.role!=='owner'){inp.value='';return}
+  loadPhoto(f).catch(function(){throw new Error('Das Foto konnte nicht gelesen werden. Bitte ein anderes Bild wählen.')})
+  .then(uploadWall).then(render)
+  .catch(function(m){state.err=(m&&m.message)||'Fehler beim Hochladen.';render()});
   inp.value='';
 }
 document.getElementById('fgal').onchange=onPhoto;
@@ -145,19 +173,52 @@ function photoButtons(primary){
 }
 
 /* ---------- views ---------- */
+function viewMsg(title,text){
+  APP.innerHTML=top('Homewall')+'<div class="card empty"><h2>'+title+'</h2><p class="muted" style="margin:0">'+text+'</p></div>';
+}
 function render(){
+  if(state.loading&&!state.wall)return viewMsg('Lade Wand …','Einen Moment bitte.');
+  if(!state.code&&!state.wall)return viewMsg('Link nötig','Öffne den Teilen-Link, den du vom Besitzer der Wand bekommen hast. Danach merkt sich dieses Gerät den Zugang.');
+  if(state.role==='none'&&!state.offline)return viewMsg('Link ungültig','Dieser Link ist ungültig oder wurde erneuert. Bitte frage den Besitzer nach dem aktuellen Teilen-Link.');
   if(!state.wall)return viewSetup();
   if(state.view==='list')return viewList();
   if(state.view==='show')return viewShow();
   if(state.view==='edit')return viewEdit();
 }
-function top(title,right){return '<header><h1>'+title+'</h1><div class="row">'+(right||'')+'</div></header>'+(state.err?'<div class="warn">'+esc(state.err)+'</div>':'')+(state.persist?'':'<div class="warn">Speichern im Browser ist hier nicht möglich. Daten gehen beim Schließen verloren.</div>');}
+function top(title,right){return '<header><h1>'+title+'</h1><div class="row">'+(right||'')+'</div></header>'+(state.err?'<div class="warn">'+esc(state.err)+'</div>':'')+(state.persist?'':'<div class="warn">Speichern im Browser ist hier nicht möglich. Daten gehen beim Schließen verloren.</div>')+(state.offline?'<div class="warn">Keine Verbindung zum Server. Es wird das zuletzt geladene Wandfoto gezeigt.</div>':'');}
 
 function viewSetup(){
+  if(state.role!=='owner')return viewMsg('Noch kein Wandfoto','Der Besitzer hat noch kein Foto der Wand hochgeladen. Bitte später nochmal öffnen.');
   APP.innerHTML=top('Homewall')+
   '<div class="card empty"><h2>Wand-Foto hinzufügen</h2>'+
-  '<p class="muted" style="margin:0">Fotografiere deine Wand frontal und bei gutem Licht. Alle Boulder werden auf diesem Foto markiert. Es bleibt auf diesem Gerät gespeichert.</p>'+
-  '<div class="row">'+photoButtons(true)+'</div></div>';
+  '<p class="muted" style="margin:0">Fotografiere deine Wand frontal und bei gutem Licht. Das Foto wird in der Cloud gespeichert und ist für alle mit Teilen-Link sichtbar. Nur du kannst es ändern.</p>'+
+  '<div class="row">'+photoButtons(true)+(state.legacy?'<button class="btn" id="legacy">Altes Foto von diesem Gerät hochladen</button>':'')+'</div></div>';
+  var lg=document.getElementById('legacy');
+  if(lg)lg.onclick=function(){uploadWall(state.legacy).then(render).catch(function(m){state.err=(m&&m.message)||'Fehler beim Hochladen.';render()})};
+}
+function copyFrom(id,btn){
+  var i=document.getElementById(id);i.focus();i.select();
+  try{navigator.clipboard.writeText(i.value).catch(function(){try{document.execCommand('copy')}catch(e){}})}catch(e){try{document.execCommand('copy')}catch(x){}}
+  btn.textContent='Kopiert (Text ist markiert)';
+}
+function ownerPanel(){
+  var base=location.origin+location.pathname,sl=base+'#'+state.share,ol=base+'#'+state.code;
+  return '<div class="card" style="padding:14px;display:flex;flex-direction:column;gap:14px"><h2>Besitzer</h2>'+
+  '<div class="field"><label for="sl">Teilen-Link für Freunde</label><input type="text" id="sl" readonly value="'+esc(sl)+'"><button class="btn" id="cps">Teilen-Link kopieren</button></div>'+
+  '<div class="field"><label for="ol">Dein Besitzer-Link (geheim)</label><input type="text" id="ol" readonly value="'+esc(ol)+'"><button class="btn" id="cpo">Besitzer-Link kopieren</button><span class="note">Schicke ihn dir per E-Mail und speichere ihn als Lesezeichen. Nicht weitergeben.</span></div>'+
+  '<div class="field"><button class="btn danger" id="rot">Teilen-Link erneuern</button><span class="note">Alle bisherigen Teilen-Links werden sofort ungültig.</span></div></div>';
+}
+function wireOwner(){
+  document.getElementById('cps').onclick=function(){copyFrom('sl',this)};
+  document.getElementById('cpo').onclick=function(){copyFrom('ol',this)};
+  document.getElementById('rot').onclick=function(){
+    var b=this;
+    if(!b.dataset.sure){b.dataset.sure=1;b.textContent='Wirklich erneuern?';setTimeout(function(){if(b.isConnected){delete b.dataset.sure;b.textContent='Teilen-Link erneuern'}},4000);return}
+    rpc('rotate_share',{p_code:state.code}).then(function(r){
+      if(!r||!r.ok)throw new Error('Das Erneuern ist fehlgeschlagen.');
+      state.share=r.share_code;state.err='';render();
+    }).catch(function(m){state.err=(m&&m.message)||'Das Erneuern ist fehlgeschlagen.';render()});
+  };
 }
 
 function filtered(){
@@ -195,8 +256,12 @@ function viewList(){
       h+='</ul>';
     }
   }
-  h+='<div class="row">'+(photoButtons(false).replace('Foto aufnehmen','Wandfoto neu aufnehmen').replace('Aus Galerie wählen','Wandfoto aus Galerie'))+'</div><p class="note">Grad 1 bis 10. Daten liegen nur auf diesem Gerät. Teilen mit Freunden kommt in Stufe 2.</p>';
+  if(state.role==='owner'){
+    h+='<div class="row">'+(photoButtons(false).replace('Foto aufnehmen','Wandfoto neu aufnehmen').replace('Aus Galerie wählen','Wandfoto aus Galerie'))+'</div><p class="note">Beim Wechsel des Wandfotos passen vorhandene Boulder nicht mehr zum neuen Foto.</p>'+ownerPanel();
+  }
+  h+='<p class="note">Grad 1 bis 10. Das Wandfoto liegt in der Cloud. Boulder, Sendestatus und Kommentare liegen noch nur auf diesem Gerät. Das Teilen kommt in Schritt 2b.</p>';
   APP.innerHTML=h;
+  if(state.role==='owner')wireOwner();
   var n=document.getElementById('new'),n2=document.getElementById('new2');
   function start(){state.draft={id:uid(),name:nextName(),grade:5,holds:[],sent:{},comments:[],author:who()};state.isNew=true;state.sel=null;state.err='';state.view='edit';render();}
   n.onclick=start;if(n2)n2.onclick=start;
@@ -298,8 +363,14 @@ function bindPointer(d){
 }
 
 /* ---------- boot ---------- */
-openDB().then(function(){return Promise.all([kvGet('wall'),kvGet('boulders'),kvGet('me'),kvGet('r')])}).then(function(v){
-  state.wall=v[0]||null;state.boulders=v[1]||[];state.me=v[2]||'';state.r=v[3]||3.4;render();
-}).catch(function(){render()});
+openDB().then(function(){return Promise.all([kvGet('wallRemote'),kvGet('wall'),kvGet('boulders'),kvGet('me'),kvGet('r'),kvGet('code')])}).then(function(v){
+  var hash=(location.hash||'').replace(/^#/,'').replace(/[^A-Za-z0-9]/g,'');
+  state.wall=v[0]||null;state.legacy=v[1]||null;state.boulders=v[2]||[];state.me=v[3]||'';state.r=v[4]||3.4;
+  if(hash.length>=32){state.code=hash;kvSet('code',hash)}else state.code=v[5]||'';
+  render();
+  return loadRemote().catch(function(){
+    state.offline=true;state.role=state.wall?'member':'none';
+  });
+}).then(function(){state.loading=false;render()}).catch(function(){state.loading=false;render()});
 })();
 </script>
