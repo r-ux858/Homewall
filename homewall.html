@@ -1,0 +1,305 @@
+<title>Homewall Boulder</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: one-column phone app. Header bar, filterable list of boulders, full-width wall photo with round hold markers on top. */
+:root{
+  --bg:#f3f4f6; --surface:#ffffff; --fg:#14181f; --muted:#5d6675; --line:#d9dde4;
+  --accent:#e0245e; --accent-fg:#ffffff;
+  --c-start:#ff2d78; --c-hand:#2bb3f0; --c-foot:#f5c400; --ok:#1c9a5a;
+  --f-display:"Barlow Condensed","Arial Narrow",sans-serif; --f-body:"Barlow",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12151a; --surface:#1b2028; --fg:#eef1f5; --muted:#9aa3b2; --line:#2c3440;
+  --accent:#ff4f86; --accent-fg:#14181f; --ok:#3ccf86; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12151a; --surface:#1b2028; --fg:#eef1f5; --muted:#9aa3b2; --line:#2c3440;
+  --accent:#ff4f86; --accent-fg:#14181f; --ok:#3ccf86; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:16px;line-height:1.4;
+  padding-block:0 32px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.app{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+.vh{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:16px}
+h1{font-family:var(--f-display);font-weight:700;font-size:30px;letter-spacing:.02em;text-transform:uppercase;margin:0}
+h2{font-family:var(--f-display);font-weight:700;font-size:22px;letter-spacing:.02em;text-transform:uppercase;margin:0}
+button,select,input,textarea{font:inherit;color:inherit}
+.btn{min-height:44px;padding:0 18px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-align:center}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.btn.danger{color:#d92d20;border-color:currentColor}
+.btn[disabled]{opacity:.4;cursor:default}
+.btn:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grow{flex:1;min-width:0}
+.muted{color:var(--muted);font-size:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.empty{padding:28px 20px;display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+.list{display:flex;flex-direction:column;gap:10px;list-style:none;padding:0;margin:0}
+.item{display:flex;align-items:center;gap:12px;padding:12px 14px;min-height:64px;cursor:pointer;width:100%;text-align:left}
+.grade{font-family:var(--f-display);font-weight:700;font-size:26px;min-width:44px;height:44px;border-radius:10px;
+  display:grid;place-items:center;background:var(--bg);border:1px solid var(--line);font-variant-numeric:tabular-nums}
+.name{font-weight:600;overflow-wrap:anywhere}
+.badge{font-size:13px;font-weight:600;padding:4px 10px;border-radius:99px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.badge.ok{color:var(--ok);border-color:currentColor}
+.stage{position:relative;border-radius:12px;overflow:hidden;background:#000;touch-action:manipulation;line-height:0}
+.stage img{width:100%;height:auto;display:block;user-select:none;-webkit-user-drag:none}
+.stage svg{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+.stage.edit{outline:3px solid var(--accent)}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+input[type=text],select{min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--surface);padding:0 12px;width:100%}
+.tools{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tool{min-height:52px;border-radius:10px;border:2px solid var(--line);background:var(--surface);font-weight:600;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:8px;padding:0 6px}
+.tool[aria-pressed="true"]{border-color:var(--fg);background:var(--bg)}
+.dot{width:20px;height:20px;border-radius:50%;flex:none;display:inline-block}
+.check{display:flex;align-items:center;gap:12px;min-height:48px;padding:0 14px;cursor:pointer}
+.check input{width:24px;height:24px;accent-color:var(--ok)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:14px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.note{font-size:13px;color:var(--muted)}
+.warn{padding:10px 14px;border-radius:10px;border:1px solid #d99a00;font-size:14px}
+.filters{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:8px;padding:12px}
+.filters .field label{font-size:12px}
+.size{display:flex;align-items:center;gap:12px}
+.size input{flex:1;min-width:0;height:36px;accent-color:var(--accent)}
+.comments{display:flex;flex-direction:column;gap:10px;padding:14px}
+.cm{display:flex;gap:10px;align-items:flex-start;border-top:1px solid var(--line);padding-top:10px}
+.cm:first-of-type{border-top:0;padding-top:0}
+.cm p{margin:0;overflow-wrap:anywhere}
+.cm small{color:var(--muted)}
+.xbtn{border:0;background:none;color:var(--muted);min-width:44px;min-height:44px;cursor:pointer;font-size:14px}
+@media (max-width:420px){.filters{grid-template-columns:1fr 1fr}.filters .field:last-child{grid-column:1/-1}}
+</style>
+<input type="file" id="fgal" class="vh" accept="image/*" tabindex="-1">
+<input type="file" id="fcam" class="vh" accept="image/*" capture="environment" tabindex="-1">
+<div class="app" id="app"></div>
+<script>
+(function(){
+var APP=document.getElementById('app');
+var GRADES=[1,2,3,4,5,6,7,8,9,10];
+var COL={start:'var(--c-start)',hand:'var(--c-hand)',foot:'var(--c-foot)'};
+var LABEL={start:'Start/Ziel',hand:'Hand',foot:'Fuß'};
+var state={wall:null,boulders:[],me:'',view:'list',cur:null,draft:null,sel:null,tool:'start',r:3.4,
+  f:{gmin:1,gmax:10,st:'all'},persist:true,err:''};
+
+/* ---------- storage: IndexedDB, falls back to memory ---------- */
+var db=null,mem={};
+function openDB(){return new Promise(function(res){
+  try{var r=indexedDB.open('homewall',1);
+    r.onupgradeneeded=function(){r.result.createObjectStore('kv')};
+    r.onsuccess=function(){db=r.result;res()};
+    r.onerror=function(){state.persist=false;res()};
+    r.onblocked=function(){state.persist=false;res()};
+  }catch(e){state.persist=false;res()}});}
+function kvGet(k){return new Promise(function(res){
+  if(!db)return res(mem[k]);
+  try{var q=db.transaction('kv').objectStore('kv').get(k);q.onsuccess=function(){res(q.result)};q.onerror=function(){res(undefined)}}catch(e){res(mem[k])}});}
+function kvSet(k,v){mem[k]=v;return new Promise(function(res){
+  if(!db)return res();
+  try{var t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=res;t.onerror=function(){state.persist=false;res()}}catch(e){state.persist=false;res()}});}
+function save(){return Promise.all([kvSet('wall',state.wall),kvSet('boulders',state.boulders),kvSet('me',state.me),kvSet('r',state.r)]);}
+
+/* ---------- helpers ---------- */
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
+function dot(t){return '<span class="dot" style="background:'+COL[t]+'"></span>'}
+function ring(h,sel){ /* round ring, no outline; units = % of photo width */
+  var r=h.r||3.4,sw=Math.max(.7,r*.34),o='<circle cx="'+h.x+'" cy="'+h.y+'" r="'+(r-sw/2)+'" fill="none" stroke="'+COL[h.t]+'" stroke-width="'+sw+'"/>';
+  if(sel)o+='<circle cx="'+h.x+'" cy="'+h.y+'" r="'+(r+1.4)+'" fill="none" stroke="#fff" stroke-width=".7" stroke-dasharray="1.6 1.2"/>';
+  return o;
+}
+function holdsSVG(holds,sel){var s='';holds.forEach(function(h){s+=ring(h,h.id===sel)});return s;}
+function wallHTML(holds,editMode,sel){
+  var w=state.wall,vb='0 0 100 '+(100*w.h/w.w);
+  return '<div class="stage'+(editMode?' edit':'')+'" id="stage"><img src="'+w.photo+'" alt="Foto der Homewall"><svg id="ov" viewBox="'+vb+'" preserveAspectRatio="none">'+holdsSVG(holds,editMode?sel:null)+'</svg></div>';
+}
+function legend(){return '<div class="legend"><span>'+dot('start')+'Start/Ziel</span><span>'+dot('hand')+'Hand</span><span>'+dot('foot')+'Fuß</span></div>';}
+function who(){return state.me||'ich'}
+function sentBy(b){return !!(b.sent&&b.sent[who()]);}
+function nextName(){var n=1,names={};state.boulders.forEach(function(b){names[b.name]=1});while(names['Boulder '+n])n++;return 'Boulder '+n;}
+function fmt(d){try{return new Date(d).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit'})}catch(e){return ''}}
+
+/* ---------- photo handling ---------- */
+function loadPhoto(file){return new Promise(function(res,rej){
+  var r=new FileReader();
+  r.onerror=function(){rej()};
+  r.onload=function(){var im=new Image();
+    im.onerror=function(){rej()};
+    im.onload=function(){
+      var M=2000,s=Math.min(1,M/Math.max(im.width,im.height)),w=Math.round(im.width*s),h=Math.round(im.height*s);
+      var c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(im,0,0,w,h);
+      res({photo:c.toDataURL('image/jpeg',.85),w:w,h:h});};
+    im.src=r.result;};
+  r.readAsDataURL(file);});}
+function onPhoto(e){
+  var inp=e.target,f=inp.files&&inp.files[0];if(!f)return;
+  loadPhoto(f).then(function(p){state.wall=p;state.err='';return save()}).then(render)
+  .catch(function(){state.err='Das Foto konnte nicht gelesen werden. Bitte ein anderes Bild wählen.';render()});
+  inp.value='';
+}
+document.getElementById('fgal').onchange=onPhoto;
+document.getElementById('fcam').onchange=onPhoto;
+function photoButtons(primary){
+  return '<label class="btn'+(primary?' primary':'')+'" for="fcam" tabindex="0">Foto aufnehmen</label><label class="btn" for="fgal" tabindex="0">Aus Galerie wählen</label>';
+}
+
+/* ---------- views ---------- */
+function render(){
+  if(!state.wall)return viewSetup();
+  if(state.view==='list')return viewList();
+  if(state.view==='show')return viewShow();
+  if(state.view==='edit')return viewEdit();
+}
+function top(title,right){return '<header><h1>'+title+'</h1><div class="row">'+(right||'')+'</div></header>'+(state.err?'<div class="warn">'+esc(state.err)+'</div>':'')+(state.persist?'':'<div class="warn">Speichern im Browser ist hier nicht möglich. Daten gehen beim Schließen verloren.</div>');}
+
+function viewSetup(){
+  APP.innerHTML=top('Homewall')+
+  '<div class="card empty"><h2>Wand-Foto hinzufügen</h2>'+
+  '<p class="muted" style="margin:0">Fotografiere deine Wand frontal und bei gutem Licht. Alle Boulder werden auf diesem Foto markiert. Es bleibt auf diesem Gerät gespeichert.</p>'+
+  '<div class="row">'+photoButtons(true)+'</div></div>';
+}
+
+function filtered(){
+  var f=state.f;
+  return state.boulders.filter(function(b){
+    if(b.grade<f.gmin||b.grade>f.gmax)return false;
+    if(f.st==='sent'&&!sentBy(b))return false;
+    if(f.st==='open'&&sentBy(b))return false;
+    return true;
+  }).sort(function(a,b){return a.grade-b.grade||a.name.localeCompare(b.name)});
+}
+function gradeOpts(sel){return GRADES.map(function(g){return '<option value="'+g+'"'+(g===sel?' selected':'')+'>'+g+'</option>'}).join('')}
+
+function viewList(){
+  var bs=filtered(),all=state.boulders.length,f=state.f;
+  var h=top('Homewall','<button class="btn primary" id="new">+ Boulder</button>');
+  h+='<div class="field"><label for="me">Dein Name (für „gesendet“ und Kommentare)</label><input type="text" id="me" maxlength="30" placeholder="z. B. Robert" value="'+esc(state.me)+'"></div>';
+  if(!all){
+    h+='<div class="card empty"><h2>Noch kein Boulder</h2><p class="muted" style="margin:0">Lege deinen ersten Boulder an: Name, Grad und Griffe auf dem Foto markieren.</p><button class="btn primary" id="new2">Ersten Boulder anlegen</button></div>';
+  }else{
+    var done=state.boulders.filter(sentBy).length,active=(f.gmin>1||f.gmax<10||f.st!=='all');
+    h+='<div class="card filters">'+
+      '<div class="field"><label for="g1">Grad von</label><select id="g1">'+gradeOpts(f.gmin)+'</select></div>'+
+      '<div class="field"><label for="g2">bis</label><select id="g2">'+gradeOpts(f.gmax)+'</select></div>'+
+      '<div class="field"><label for="st">Status</label><select id="st"><option value="all"'+(f.st==='all'?' selected':'')+'>Alle</option><option value="open"'+(f.st==='open'?' selected':'')+'>Offen</option><option value="sent"'+(f.st==='sent'?' selected':'')+'>Gesendet</option></select></div>'+
+      '</div>'+
+      '<div class="row"><span class="muted grow">'+bs.length+' von '+all+' Boulder · '+done+' gesendet</span>'+(active?'<button class="btn" id="reset">Filter zurücksetzen</button>':'')+'</div>';
+    if(!bs)h+='';
+    if(!bs.length)h+='<div class="card empty"><p class="muted" style="margin:0">Kein Boulder passt zum Filter.</p></div>';
+    else{
+      h+='<ul class="list">';
+      bs.forEach(function(b){
+        var nc=(b.comments||[]).length;
+        h+='<li><button class="card item" data-id="'+b.id+'"><span class="grade">'+b.grade+'</span><span class="grow"><span class="name">'+esc(b.name)+'</span>'+(nc?'<br><span class="muted">'+nc+' Kommentar'+(nc>1?'e':'')+'</span>':'')+'</span><span class="badge'+(sentBy(b)?' ok':'')+'">'+(sentBy(b)?'gesendet':'offen')+'</span></button></li>';});
+      h+='</ul>';
+    }
+  }
+  h+='<div class="row">'+(photoButtons(false).replace('Foto aufnehmen','Wandfoto neu aufnehmen').replace('Aus Galerie wählen','Wandfoto aus Galerie'))+'</div><p class="note">Grad 1 bis 10. Daten liegen nur auf diesem Gerät. Teilen mit Freunden kommt in Stufe 2.</p>';
+  APP.innerHTML=h;
+  var n=document.getElementById('new'),n2=document.getElementById('new2');
+  function start(){state.draft={id:uid(),name:nextName(),grade:5,holds:[],sent:{},comments:[],author:who()};state.isNew=true;state.sel=null;state.err='';state.view='edit';render();}
+  n.onclick=start;if(n2)n2.onclick=start;
+  document.getElementById('me').onchange=function(e){state.me=e.target.value.trim();save().then(render)};
+  var g1=document.getElementById('g1');
+  if(g1){
+    g1.onchange=function(e){f.gmin=+e.target.value;if(f.gmax<f.gmin)f.gmax=f.gmin;render()};
+    document.getElementById('g2').onchange=function(e){f.gmax=+e.target.value;if(f.gmin>f.gmax)f.gmin=f.gmax;render()};
+    document.getElementById('st').onchange=function(e){f.st=e.target.value;render()};
+    var rs=document.getElementById('reset');if(rs)rs.onclick=function(){f.gmin=1;f.gmax=10;f.st='all';render()};
+  }
+  [].forEach.call(APP.querySelectorAll('.item'),function(el){el.onclick=function(){
+    state.cur=state.boulders.filter(function(b){return b.id===el.dataset.id})[0];state.err='';state.view='show';render();}});
+}
+
+function viewShow(){
+  var b=state.cur;b.comments=b.comments||[];
+  var cm=b.comments.length?b.comments.map(function(c){
+    return '<div class="cm"><div class="grow"><small>'+esc(c.a)+' · '+fmt(c.d)+'</small><p>'+esc(c.t)+'</p></div>'+(c.a===who()?'<button class="xbtn" data-c="'+c.id+'" aria-label="Kommentar löschen">Löschen</button>':'')+'</div>';
+  }).join(''):'<p class="muted" style="margin:0">Noch keine Kommentare. Schreibe einen Tipp zur Beta oder zum Schwierigkeitsgrad.</p>';
+  APP.innerHTML=top('<span class="grade" style="display:inline-grid;margin-right:8px;vertical-align:middle">'+b.grade+'</span>'+esc(b.name))+
+  wallHTML(b.holds,false)+legend()+
+  '<label class="card check"><input type="checkbox" id="sent"'+(sentBy(b)?' checked':'')+'><span class="grow">Gesendet'+(state.me?' ('+esc(state.me)+')':'')+'</span></label>'+
+  '<div class="card comments"><h2>Kommentare</h2>'+cm+
+  '<div class="row" style="flex-wrap:nowrap"><input type="text" id="cin" class="grow" maxlength="500" placeholder="Kommentar schreiben"><button class="btn primary" id="csend">Senden</button></div></div>'+
+  '<div class="row"><button class="btn" id="back">Zurück</button><button class="btn primary" id="edit">Bearbeiten</button><button class="btn danger" id="del">Löschen</button></div>';
+  document.getElementById('back').onclick=function(){state.view='list';render()};
+  document.getElementById('sent').onchange=function(e){
+    var k=who();b.sent=b.sent||{};if(e.target.checked)b.sent[k]=new Date().toISOString().slice(0,10);else delete b.sent[k];
+    save().then(render)};
+  function send(){var i=document.getElementById('cin'),t=i.value.trim();if(!t)return;
+    b.comments.push({id:uid(),a:who(),t:t,d:new Date().toISOString()});save().then(render)}
+  document.getElementById('csend').onclick=send;
+  document.getElementById('cin').onkeydown=function(e){if(e.key==='Enter')send()};
+  [].forEach.call(APP.querySelectorAll('.xbtn'),function(x){x.onclick=function(){
+    b.comments=b.comments.filter(function(c){return c.id!==x.dataset.c});save().then(render)}});
+  document.getElementById('edit').onclick=function(){state.draft=JSON.parse(JSON.stringify(b));state.isNew=false;state.sel=null;state.view='edit';render()};
+  document.getElementById('del').onclick=function(){
+    var d=document.getElementById('del');
+    if(d.dataset.sure){state.boulders=state.boulders.filter(function(x){return x.id!==b.id});save().then(function(){state.view='list';render()});}
+    else{d.dataset.sure=1;d.textContent='Wirklich löschen?';setTimeout(function(){if(d.isConnected){delete d.dataset.sure;d.textContent='Löschen'}},4000)}};
+}
+
+function selHold(){var d=state.draft;return d.holds.filter(function(x){return x.id===state.sel})[0]||null}
+
+function viewEdit(){
+  var d=state.draft,sh=selHold();
+  var h=top(state.isNew?'Neuer Boulder':'Bearbeiten')+
+  '<div class="row" style="align-items:flex-end"><div class="field grow"><label for="nm">Name</label><input type="text" id="nm" maxlength="40" value="'+esc(d.name)+'"></div>'+
+  '<div class="field" style="width:90px"><label for="gr">Grad</label><select id="gr">'+gradeOpts(d.grade)+'</select></div></div>'+
+  '<div class="tools" role="group" aria-label="Griffart">'+['start','hand','foot'].map(function(t){return '<button class="tool" data-t="'+t+'" aria-pressed="'+((sh?sh.t:state.tool)===t)+'">'+dot(t)+LABEL[t]+'</button>'}).join('')+'</div>'+
+  wallHTML(d.holds,true,state.sel)+
+  '<div class="card" style="padding:12px 14px"><div class="field"><label for="size">Kreisgröße'+(sh?' (gewählter Griff)':' (neue Griffe)')+'</label><div class="size"><span class="muted">klein</span><input type="range" id="size" min="1.5" max="9" step="0.1" value="'+(sh?sh.r:state.r)+'"><span class="muted">groß</span></div></div></div>'+
+  '<p class="note">Tippe aufs Foto, um einen Kreis zu setzen. Kreis antippen wählt ihn, ziehen verschiebt ihn. '+d.holds.length+' Griffe gesetzt.</p>'+
+  '<div class="row"><button class="btn danger" id="rm"'+(sh?'':' disabled')+'>Griff löschen</button><button class="btn" id="undo"'+(d.holds.length?'':' disabled')+'>Letzten entfernen</button><button class="btn" id="desel"'+(sh?'':' disabled')+'>Auswahl aufheben</button></div>'+
+  '<div class="row"><button class="btn grow" id="cancel">Abbrechen</button><button class="btn primary grow" id="ok">Speichern</button></div>';
+  APP.innerHTML=h;
+  var nm=document.getElementById('nm');
+  nm.oninput=function(){d.name=nm.value};
+  nm.onfocus=function(){if(state.isNew&&d.name===nextName())try{nm.select()}catch(e){}};
+  document.getElementById('gr').onchange=function(e){d.grade=+e.target.value};
+  [].forEach.call(APP.querySelectorAll('.tool'),function(el){el.onclick=function(){
+    state.tool=el.dataset.t;var s=selHold();if(s)s.t=state.tool;render()}});
+  var sz=document.getElementById('size');
+  sz.oninput=function(){var v=+sz.value,s=selHold();if(s)s.r=v;else state.r=v;document.getElementById('ov').innerHTML=holdsSVG(d.holds,state.sel)};
+  sz.onchange=function(){var s=selHold();if(s)state.r=s.r;save()};
+  document.getElementById('cancel').onclick=function(){state.draft=null;state.err='';state.view=state.isNew?'list':'show';render()};
+  document.getElementById('undo').onclick=function(){d.holds.pop();state.sel=null;render()};
+  document.getElementById('rm').onclick=function(){d.holds=d.holds.filter(function(x){return x.id!==state.sel});state.sel=null;render()};
+  document.getElementById('desel').onclick=function(){state.sel=null;render()};
+  document.getElementById('ok').onclick=function(){
+    d.name=nm.value.trim();
+    if(!d.name){state.err='Bitte einen Namen eingeben.';render();var n=document.getElementById('nm');if(n)n.focus();return}
+    if(!d.holds.length){state.err='Bitte mindestens einen Griff setzen.';render();return}
+    state.err='';
+    if(state.isNew)state.boulders.push(d);
+    else state.boulders=state.boulders.map(function(x){return x.id===d.id?d:x});
+    state.cur=d;state.draft=null;
+    save().then(function(){state.view='show';render()});};
+  bindPointer(d);
+}
+
+function bindPointer(d){
+  var ov=document.getElementById('ov'),w=state.wall,H=100*w.h/w.w,drag=null;
+  function pt(e){var r=ov.getBoundingClientRect();return {x:(e.clientX-r.left)/r.width*100,y:(e.clientY-r.top)/r.height*H}}
+  function near(p){var best=null,bd=1e9;d.holds.forEach(function(h){var dd=Math.hypot(h.x-p.x,h.y-p.y)-(h.r||3.4);if(dd<bd){bd=dd;best=h}});return bd<=1.5?best:null}
+  ov.onpointerdown=function(e){
+    e.preventDefault();var p=pt(e),h=near(p);
+    if(h){drag=h;state.sel=h.id;try{ov.setPointerCapture(e.pointerId)}catch(x){}ov.innerHTML=holdsSVG(d.holds,state.sel)}
+    else{var nh={id:uid(),t:state.tool,x:+p.x.toFixed(2),y:+p.y.toFixed(2),r:state.r};d.holds.push(nh);state.sel=nh.id;render()}
+  };
+  ov.onpointermove=function(e){
+    if(!drag)return;var p=pt(e);
+    drag.x=+Math.min(100,Math.max(0,p.x)).toFixed(2);drag.y=+Math.min(H,Math.max(0,p.y)).toFixed(2);
+    ov.innerHTML=holdsSVG(d.holds,state.sel);
+  };
+  ov.onpointerup=function(){if(drag){drag=null;render()}};
+  ov.onpointercancel=function(){drag=null;render()};
+}
+
+/* ---------- boot ---------- */
+openDB().then(function(){return Promise.all([kvGet('wall'),kvGet('boulders'),kvGet('me'),kvGet('r')])}).then(function(v){
+  state.wall=v[0]||null;state.boulders=v[1]||[];state.me=v[2]||'';state.r=v[3]||3.4;render();
+}).catch(function(){render()});
+})();
+</script>
