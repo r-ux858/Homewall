@@ -41,6 +41,7 @@ h1.h1s{font-size:24px;line-height:1.15}
 .bt[aria-pressed="true"]{border-color:var(--fg);background:var(--bg)}
 .bt b{font-family:var(--f-display);font-size:26px;line-height:1}
 .bl{display:flex;flex-direction:column;align-items:flex-start;text-align:left;min-width:0}
+.ver{font-size:11px;color:var(--muted);opacity:.8}
 .bt small{font-size:12px;color:var(--muted);white-space:nowrap}
 .dot.big{width:26px;height:26px}
 .stage{-webkit-touch-callout:none;user-select:none}
@@ -49,7 +50,7 @@ h1.h1s{font-size:24px;line-height:1.15}
 .zoom{position:relative;transform-origin:0 0}
 .zctl{position:absolute;top:8px;right:8px;display:flex;flex-direction:column;gap:6px;z-index:3;line-height:1}
 .zb{width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--fg);font-weight:700;font-size:20px;line-height:1;cursor:pointer;opacity:.92;padding:0}
-@media (pointer:coarse){.sizecard,.zctl{display:none}}
+@media (pointer:coarse){.sizecard,.zctl{display:none}.stage.edit{margin-inline:-16px;width:calc(100% + 32px);max-width:none;border-radius:0}.stage.edit img{max-height:calc(100svh - 165px)}}
 .stage img{-webkit-touch-callout:none;pointer-events:none}
 h1{font-family:var(--f-display);font-weight:700;font-size:30px;letter-spacing:.02em;text-transform:uppercase;margin:0}
 h2{font-family:var(--f-display);font-weight:700;font-size:22px;letter-spacing:.02em;text-transform:uppercase;margin:0}
@@ -206,9 +207,11 @@ function ring(h,sel){ /* round ring, no outline; pending circles are filled and 
   return o;
 }
 function holdsSVG(holds,sel){var s='';holds.forEach(function(h){s+=ring(h,h.id===sel)});return s;}
+var APP_VERSION='1.1.1';
+function PH(w,h){return 'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'"/>')}
 function wallHTML(holds,editMode,sel){
   var w=state.wall,vb='0 0 100 '+(100*w.h/w.w);
-  return '<div class="stage'+(editMode?' edit':'')+'" id="stage"><div class="zoom" id="zoom"><img src="'+w.photo+'" alt="Foto der Homewall"><svg id="ov" viewBox="'+vb+'" preserveAspectRatio="none">'+holdsSVG(holds,editMode?sel:null)+'</svg></div>'+
+  return '<div class="stage'+(editMode?' edit':'')+'" id="stage"><div class="zoom" id="zoom" style="background:url(\''+w.photo+'\') 0 0/100% 100% no-repeat"><img src="'+PH(w.w,w.h)+'" alt="Foto der Homewall" draggable="false"><svg id="ov" viewBox="'+vb+'" preserveAspectRatio="none">'+holdsSVG(holds,editMode?sel:null)+'</svg></div>'+
   '<div class="zctl"><button class="zb" id="zin" aria-label="Foto vergrößern">+</button><button class="zb" id="zout" aria-label="Foto verkleinern">&minus;</button><button class="zb" id="zreset" aria-label="Zoom zurücksetzen" style="font-size:13px">1&times;</button></div></div>';
 }
 function legend(){return '<div class="legend"><span>'+dot('start')+'Start/Ziel</span><span>'+dot('hand')+'Hand</span><span>'+dot('foot')+'Fuß</span></div>';}
@@ -434,7 +437,7 @@ function viewList(){
   if(state.role==='owner'){
     h+='<div class="row">'+(photoButtons(false).replace('Foto aufnehmen','Wandfoto neu aufnehmen').replace('Aus Galerie wählen','Wandfoto aus Galerie'))+'</div><p class="note">Beim Wechsel des Wandfotos passen vorhandene Boulder nicht mehr zum neuen Foto.</p>'+ownerPanel();
   }
-  h+='<p class="note">Grad 1 bis 10. Wandfoto, Boulder, Sendestatus und Kommentare liegen in der Cloud und sind für alle mit Teilen-Link sichtbar. Die Liste aktualisiert sich alle 30 Sekunden. Version 1.1</p>';
+  h+='<p class="note">Grad 1 bis 10. Wandfoto, Boulder, Sendestatus und Kommentare liegen in der Cloud und sind für alle mit Teilen-Link sichtbar. Die Liste aktualisiert sich alle 30 Sekunden. <span class="ver">Version '+APP_VERSION+'</span></p>';
   APP.innerHTML=h;
   if(state.role==='owner')wireOwner();
   var n=document.getElementById('new'),n2=document.getElementById('new2');
@@ -598,6 +601,7 @@ function viewEdit(){
   bindEdit(d);
   bindZoomControls();
   paintEdit();
+  try{if(matchMedia('(pointer:coarse)').matches){var sg=stageEl().getBoundingClientRect();window.scrollTo(0,Math.max(0,window.scrollY+sg.top-72))}}catch(x){}
 }
 
 /* Trackpad mode: the finger moves the active circle 1:1 relative to where the touch started. Two fingers resize it. */
@@ -641,7 +645,7 @@ function bindEdit(d){
     }
     if(g.mode==='zoom'&&ids.length>=2){pinchMove(g,ptr[ids[0]],ptr[ids[1]]);return}
     if(ids.length!==1)return;
-    if(g.mode==='tap'&&Math.hypot(e.clientX-g.sx,e.clientY-g.sy)>4){
+    if(g.mode==='tap'&&Math.hypot(e.clientX-g.sx,e.clientY-g.sy)>12){
       g.mode='drag';
       if(!selHold()&&g.down){state.sel=g.down.id;state.tool=g.down.t}
     }
