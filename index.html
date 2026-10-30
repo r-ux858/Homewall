@@ -45,11 +45,12 @@ h1.h1s{font-size:24px;line-height:1.15}
 .dot.big{width:26px;height:26px}
 .stage{-webkit-touch-callout:none;user-select:none}
 .stage.edit{display:block;width:fit-content;max-width:100%;margin-inline:auto;touch-action:none}
-.stage.edit img{width:auto;max-width:100%;max-height:60vh;max-height:calc(100svh - 320px)}
+.stage.edit img{width:auto;max-width:100%;max-height:60vh;max-height:calc(100svh - 250px)}
 .zoom{position:relative;transform-origin:0 0}
 .zctl{position:absolute;top:8px;right:8px;display:flex;flex-direction:column;gap:6px;z-index:3;line-height:1}
 .zb{width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--fg);font-weight:700;font-size:20px;line-height:1;cursor:pointer;opacity:.92;padding:0}
-@media (pointer:coarse){.sizecard{display:none}}
+@media (pointer:coarse){.sizecard,.zctl{display:none}}
+.stage img{-webkit-touch-callout:none;pointer-events:none}
 h1{font-family:var(--f-display);font-weight:700;font-size:30px;letter-spacing:.02em;text-transform:uppercase;margin:0}
 h2{font-family:var(--f-display);font-weight:700;font-size:22px;letter-spacing:.02em;text-transform:uppercase;margin:0}
 button,select,input,textarea{font:inherit;color:inherit}
@@ -249,6 +250,7 @@ function pinchMove(g,a,b){
 }
 function bindZoomControls(){
   var st=stageEl();if(!st)return;
+  try{if(matchMedia('(pointer:coarse)').matches)st.addEventListener('contextmenu',function(e){e.preventDefault()})}catch(x){}
   function center(f){zoomAbout(st.clientWidth/2,st.clientHeight/2,state.z.s*f)}
   document.getElementById('zin').onclick=function(){center(1.5)};
   document.getElementById('zout').onclick=function(){center(1/1.5)};
@@ -432,7 +434,7 @@ function viewList(){
   if(state.role==='owner'){
     h+='<div class="row">'+(photoButtons(false).replace('Foto aufnehmen','Wandfoto neu aufnehmen').replace('Aus Galerie wählen','Wandfoto aus Galerie'))+'</div><p class="note">Beim Wechsel des Wandfotos passen vorhandene Boulder nicht mehr zum neuen Foto.</p>'+ownerPanel();
   }
-  h+='<p class="note">Grad 1 bis 10. Wandfoto, Boulder, Sendestatus und Kommentare liegen in der Cloud und sind für alle mit Teilen-Link sichtbar. Die Liste aktualisiert sich alle 30 Sekunden. Version 2c.1</p>';
+  h+='<p class="note">Grad 1 bis 10. Wandfoto, Boulder, Sendestatus und Kommentare liegen in der Cloud und sind für alle mit Teilen-Link sichtbar. Die Liste aktualisiert sich alle 30 Sekunden. Version 1.1</p>';
   APP.innerHTML=h;
   if(state.role==='owner')wireOwner();
   var n=document.getElementById('new'),n2=document.getElementById('new2');
@@ -519,7 +521,7 @@ function selHold(){var d=state.draft;return d?(d.holds.filter(function(x){return
 function hintText(a){
   if(!a&&!state.tool)return 'Wähle unten S/T, M oder F und tippe dann aufs Foto. Zwei Finger zoomen das Foto, ein Finger verschiebt es. Einen vorhandenen Kreis tippst du an, um ihn zu ändern.';
   if(!a)return 'Tippe aufs Foto, um den Kreis zu setzen.';
-  if(a.p)return 'Ziehe irgendwo auf dem Foto, um den Kreis zu verschieben. Zwei Finger ändern die Größe. Dieselbe Taste unten bestätigt.';
+  if(a.p)return 'Ziehe irgendwo auf dem Foto, um den Kreis zu verschieben. Zwei Finger ändern die Größe. Tippen aufs Foto oder dieselbe Taste unten bestätigt.';
   return 'Kreis gewählt: Ziehen verschiebt, zwei Finger ändern die Größe, Papierkorb löscht. Taste unten schließt die Auswahl.';
 }
 function paintEdit(){
@@ -608,8 +610,8 @@ function bindEdit(d){
   function tap(p,h){
     var a=selHold();
     if(h&&(!a||h.id!==a.id)){if(a&&a.p)a.p=false;state.sel=h.id;state.tool=h.t;return}
-    if(h)return;
-    if(a){if(!a.p)state.sel=null;return}
+    if(h){if(a&&a.p){a.p=false;state.sel=null}return}
+    if(a){a.p=false;state.sel=null;return}
     if(state.tool){
       var nh={id:uid(),t:state.tool,x:+Math.min(100,Math.max(0,p.x)).toFixed(2),y:+Math.min(H,Math.max(0,p.y)).toFixed(2),r:state.r,p:true};
       d.holds.push(nh);state.sel=nh.id;
