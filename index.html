@@ -91,7 +91,16 @@ input[type=text],select{min-height:44px;border-radius:10px;border:1px solid var(
 .note{font-size:13px;color:var(--muted)}
 .warn{padding:10px 14px;border-radius:10px;border:1px solid #d99a00;font-size:14px}
 .warn.err{position:sticky;top:calc(env(safe-area-inset-top,0px) + 66px);z-index:6;background:var(--surface);border:2px solid #d92d20}
-.filters{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:8px;padding:12px}
+.filters{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px}
+.mk{padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.mkb{min-height:44px;padding:0 14px;border-radius:10px;border:2px solid var(--line);background:var(--surface);font-weight:600;cursor:pointer}
+.mkb.on{border-color:var(--accent);background:var(--bg)}
+.mkb[disabled]{opacity:.4}
+.stars{display:flex;gap:4px}
+.sb{width:46px;height:46px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-size:24px;line-height:1;color:var(--muted);cursor:pointer;padding:0}
+.sb.on{color:#f5b301;border-color:#f5b301}
+.sb[disabled]{opacity:.4}
+.mi{font-size:13px;color:var(--muted);white-space:nowrap}
 .filters .field label{font-size:12px}
 .size{display:flex;align-items:center;gap:12px}
 .size input{flex:1;min-width:0;height:36px;accent-color:var(--accent)}
@@ -101,7 +110,7 @@ input[type=text],select{min-height:44px;border-radius:10px;border:1px solid var(
 .cm p{margin:0;overflow-wrap:anywhere}
 .cm small{color:var(--muted)}
 .xbtn{border:0;background:none;color:var(--muted);min-width:44px;min-height:44px;cursor:pointer;font-size:14px}
-@media (max-width:420px){.filters{grid-template-columns:1fr 1fr}.filters .field:last-child{grid-column:1/-1}}
+
 </style>
 </head>
 <body>
@@ -115,7 +124,7 @@ var GRADES=[1,2,3,4,5,6,7,8,9,10];
 var COL={start:'var(--c-start)',hand:'var(--c-hand)',foot:'var(--c-foot)'};
 var LABEL={start:'Start/Ziel',hand:'Hand',foot:'Fuß'};
 var state={wall:null,boulders:[],legacyB:[],legacy:null,me:'',view:'list',cur:null,draft:null,sel:null,tool:'start',r:3.4,
-  f:{gmin:1,gmax:10,st:'all'},persist:true,err:'',code:'',role:'',share:'',device:'',loading:true,offline:false,busy:false,stale:false,z:{s:1,x:0,y:0}};
+  f:{gmin:1,gmax:10,st:'all',mk:'all'},persist:true,err:'',code:'',role:'',share:'',device:'',loading:true,offline:false,busy:false,stale:false,z:{s:1,x:0,y:0}};
 
 /* ---------- Supabase (public values; protection lives in the database rules) ---------- */
 var SB_URL='https://ldangrtzwevbkeotkcmi.supabase.co';
@@ -207,7 +216,7 @@ function ring(h,sel){ /* round ring, no outline; pending circles are filled and 
   return o;
 }
 function holdsSVG(holds,sel){var s='';holds.forEach(function(h){s+=ring(h,h.id===sel)});return s;}
-var APP_VERSION='1.1.2';
+var APP_VERSION='1.2';
 function PH(w,h){return 'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'"/>')}
 function wallHTML(holds,editMode,sel){
   var w=state.wall,vb='0 0 100 '+(100*w.h/w.w);
@@ -216,6 +225,33 @@ function wallHTML(holds,editMode,sel){
 }
 function legend(){return '<div class="legend"><span>'+dot('start')+'Start/Ziel</span><span>'+dot('hand')+'Hand</span><span>'+dot('foot')+'Fuß</span></div>';}
 function sentBy(b){return !!(state.me&&b.sent&&b.sent[state.me]);}
+function myMark(b){var m=b.marks&&state.me&&b.marks[state.me];return m||{f:false,p:false,s:null,g:null}}
+function avg(b,k){var a=[];Object.keys(b.marks||{}).forEach(function(p){var v=b.marks[p][k];if(v)a.push(v)});
+  return a.length?{n:a.length,v:a.reduce(function(x,y){return x+y},0)/a.length}:null}
+function fmt1(x){return (Math.round(x*10)/10).toString().replace('.',',')}
+function listMarks(b){
+  var m=myMark(b),a=avg(b,'s'),o='';
+  if(m.f)o+=' <span class="mi" aria-label="Favorit">★ Favorit</span>';
+  if(m.p)o+=' <span class="mi" aria-label="Projekt">⚑ Projekt</span>';
+  if(a)o+=' <span class="mi">Ø '+fmt1(a.v)+' Sterne</span>';
+  return o;
+}
+function setMark(b,ch){
+  var m=myMark(b),n={f:m.f,p:m.p,s:m.s,g:m.g};
+  Object.keys(ch).forEach(function(k){n[k]=ch[k]});
+  b.marks=b.marks||{};
+  if(!n.f&&!n.p&&!n.s&&!n.g)delete b.marks[state.me];else b.marks[state.me]=n;
+  render();
+  act(rpc('set_mark',{p_code:state.code,p_id:b.id,p_person:state.me,p_fav:!!n.f,p_project:!!n.p,p_stars:n.s||null,p_grade:n.g||null}));
+}
+function markCard(b){
+  var ok=!!state.me&&!state.offline,m=myMark(b),as=avg(b,'s'),ag=avg(b,'g'),d=ok?'':' disabled';
+  var st='';for(var n=1;n<=5;n++)st+='<button class="sb'+(m.s>=n?' on':'')+'" data-s="'+n+'" aria-label="'+n+' Sterne"'+d+'>★</button>';
+  return '<div class="card mk"><div class="row"><button class="mkb'+(m.f?' on':'')+'" id="mfav" aria-pressed="'+(m.f?'true':'false')+'"'+d+'>★ Favorit</button><button class="mkb'+(m.p?' on':'')+'" id="mprj" aria-pressed="'+(m.p?'true':'false')+'"'+d+'>⚑ Projekt</button></div>'+
+  '<div class="field"><label>Deine Sterne</label><div class="stars" role="group" aria-label="Deine Sterne">'+st+'</div><span class="muted">'+(as?'Ø '+fmt1(as.v)+' Sterne von '+as.n+(as.n>1?' Personen':' Person'):'Noch keine Sterne')+'</span></div>'+
+  '<div class="field"><label for="gv">Dein Grad-Vorschlag</label><select id="gv"'+d+'><option value="">–</option>'+GRADES.map(function(g){return '<option value="'+g+'"'+(m.g===g?' selected':'')+'>'+g+'</option>'}).join('')+'</select><span class="muted">'+(ag?'Ø '+fmt1(ag.v)+' bei '+ag.n+(ag.n>1?' Vorschlägen':' Vorschlag'):'Noch kein Vorschlag')+'</span></div>'+
+  (state.me?'':'<span class="muted">Trage deinen Namen ein, um zu bewerten.</span>')+'</div>';
+}
 function canEdit(b){return state.role==='owner'||b.dev===state.device;}
 function nextName(){var n=1,names={};state.boulders.forEach(function(b){names[b.name]=1});while(names['Boulder '+n])n++;return 'Boulder '+n;}
 function fmt(d){try{return new Date(d).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit'})}catch(e){return ''}}
@@ -420,6 +456,8 @@ function filtered(){
     if(b.grade<f.gmin||b.grade>f.gmax)return false;
     if(f.st==='sent'&&!sentBy(b))return false;
     if(f.st==='open'&&sentBy(b))return false;
+    if(f.mk==='fav'&&!myMark(b).f)return false;
+    if(f.mk==='proj'&&!myMark(b).p)return false;
     return true;
   }).sort(function(a,b){return a.grade-b.grade||a.name.localeCompare(b.name)});
 }
@@ -435,11 +473,12 @@ function viewList(){
   if(!all){
     h+='<div class="card empty"><h2>Noch kein Boulder</h2><p class="muted" style="margin:0">Lege den ersten Boulder an: Name, Grad und Griffe auf dem Foto markieren.</p><button class="btn primary" id="new2"'+(state.offline?' disabled':'')+'>Ersten Boulder anlegen</button></div>';
   }else{
-    var done=state.boulders.filter(sentBy).length,active=(f.gmin>1||f.gmax<10||f.st!=='all');
+    var done=state.boulders.filter(sentBy).length,active=(f.gmin>1||f.gmax<10||f.st!=='all'||f.mk!=='all');
     h+='<div class="card filters">'+
       '<div class="field"><label for="g1">Grad von</label><select id="g1">'+gradeOpts(f.gmin)+'</select></div>'+
       '<div class="field"><label for="g2">bis</label><select id="g2">'+gradeOpts(f.gmax)+'</select></div>'+
       '<div class="field"><label for="st">Status</label><select id="st"><option value="all"'+(f.st==='all'?' selected':'')+'>Alle</option><option value="open"'+(f.st==='open'?' selected':'')+'>Offen</option><option value="sent"'+(f.st==='sent'?' selected':'')+'>Gesendet</option></select></div>'+
+      '<div class="field"><label for="mk">Merken</label><select id="mk"><option value="all"'+(f.mk==='all'?' selected':'')+'>Alle</option><option value="fav"'+(f.mk==='fav'?' selected':'')+'>Favoriten</option><option value="proj"'+(f.mk==='proj'?' selected':'')+'>Projekte</option></select></div>'+
       '</div>'+
       '<div class="row"><span class="muted grow">'+bs.length+' von '+all+' Boulder · '+done+' von dir gesendet</span>'+(active?'<button class="btn" id="reset">Filter zurücksetzen</button>':'')+'</div>';
     if(!bs.length)h+='<div class="card empty"><p class="muted" style="margin:0">Kein Boulder passt zum Filter.</p></div>';
@@ -447,7 +486,7 @@ function viewList(){
       h+='<ul class="list">';
       bs.forEach(function(b){
         var nc=(b.comments||[]).length,sub=(b.author?'von '+esc(b.author):'')+(nc?(b.author?' · ':'')+nc+' Kommentar'+(nc>1?'e':''):'');
-        h+='<li><button class="card item" data-id="'+b.id+'"><span class="grade">'+b.grade+'</span><span class="grow"><span class="name">'+esc(b.name)+'</span>'+(sub?'<br><span class="muted">'+sub+'</span>':'')+'</span><span class="badge'+(sentBy(b)?' ok':'')+'">'+(sentBy(b)?'gesendet':'offen')+'</span></button></li>';});
+        h+='<li><button class="card item" data-id="'+b.id+'"><span class="grade">'+b.grade+'</span><span class="grow"><span class="name">'+esc(b.name)+'</span>'+listMarks(b)+(sub?'<br><span class="muted">'+sub+'</span>':'')+'</span><span class="badge'+(sentBy(b)?' ok':'')+'">'+(sentBy(b)?'gesendet':'offen')+'</span></button></li>';});
       h+='</ul>';
     }
   }
@@ -479,7 +518,8 @@ function viewList(){
     g1.onchange=function(e){f.gmin=+e.target.value;if(f.gmax<f.gmin)f.gmax=f.gmin;render()};
     document.getElementById('g2').onchange=function(e){f.gmax=+e.target.value;if(f.gmin>f.gmax)f.gmin=f.gmax;render()};
     document.getElementById('st').onchange=function(e){f.st=e.target.value;render()};
-    var rs=document.getElementById('reset');if(rs)rs.onclick=function(){f.gmin=1;f.gmax=10;f.st='all';render()};
+    document.getElementById('mk').onchange=function(e){f.mk=e.target.value;render()};
+    var rs=document.getElementById('reset');if(rs)rs.onclick=function(){f.gmin=1;f.gmax=10;f.st='all';f.mk='all';render()};
   }
   [].forEach.call(APP.querySelectorAll('.item'),function(el){el.onclick=function(){
     state.cur=state.boulders.filter(function(b){return b.id===el.dataset.id})[0];state.err='';nav('show');}});
@@ -501,6 +541,7 @@ function viewShow(){
   wallHTML(b.holds,false)+legend()+
   (named?'':nameBox())+
   '<label class="card check"><input type="checkbox" id="sent"'+(sentBy(b)?' checked':'')+((named&&!off)?'':' disabled')+'><span class="grow">Gesendet'+(named?' ('+esc(state.me)+')':'')+'</span></label>'+
+  markCard(b)+
   (sentList.length?'<p class="muted" style="margin:0">Gesendet von: '+sentList.map(function(p){return esc(p)}).join(', ')+'</p>':'')+
   '<div class="card comments"><h2>Kommentare</h2>'+cm+
   '<div class="row" style="flex-wrap:nowrap"><input type="text" id="cin" class="grow" maxlength="500" placeholder="Kommentar schreiben"'+((named&&!off)?'':' disabled')+'><button class="btn primary" id="csend"'+((named&&!off)?'':' disabled')+'>Senden</button></div></div>'+
@@ -517,6 +558,10 @@ function viewShow(){
   document.getElementById('sent').onchange=function(e){
     act(rpc('set_sent',{p_code:state.code,p_id:b.id,p_person:state.me,p_sent:e.target.checked}));
   };
+  document.getElementById('mfav').onclick=function(){setMark(b,{f:!myMark(b).f})};
+  document.getElementById('mprj').onclick=function(){setMark(b,{p:!myMark(b).p})};
+  [].forEach.call(APP.querySelectorAll('.sb'),function(x){x.onclick=function(){var v=+x.dataset.s;setMark(b,{s:myMark(b).s===v?null:v})}});
+  document.getElementById('gv').onchange=function(e){setMark(b,{g:e.target.value?+e.target.value:null})};
   function send(){var i=document.getElementById('cin'),t=i.value.trim();if(!t||state.busy)return;state.busy=true;
     act(rpc('add_comment',{p_code:state.code,p_id:b.id,p_author:state.me,p_device:state.device,p_body:t}).then(function(r){state.busy=false;return r}))}
   document.getElementById('csend').onclick=send;
