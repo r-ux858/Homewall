@@ -100,8 +100,6 @@ input[type=text],select{min-height:44px;border-radius:10px;border:1px solid var(
 .sb{width:46px;height:46px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-size:24px;line-height:1;color:var(--muted);cursor:pointer;padding:0}
 .sb.on{color:#f5b301;border-color:#f5b301}
 .sb[disabled]{opacity:.4}
-.dim{position:absolute;inset:0;background:#000;opacity:.45;pointer-events:none}
-.stage.edit .dim{opacity:.25}
 .more>summary{cursor:pointer;font-weight:600;min-height:44px;display:flex;align-items:center;list-style:none}
 .more>summary::-webkit-details-marker{display:none}
 .more>summary::before{content:'▸';margin-right:8px;display:inline-block;transition:transform .15s}
@@ -222,12 +220,19 @@ function ring(h,sel){ /* round ring, no outline; pending circles are filled and 
   if(sel)o+='<circle cx="'+h.x+'" cy="'+h.y+'" r="'+(r+1.4)+'" fill="none" stroke="#fff" stroke-width=".7" stroke-dasharray="1.6 1.2"/>';
   return o;
 }
-function holdsSVG(holds,sel){var s='';holds.forEach(function(h){s+=ring(h,h.id===sel)});return s;}
-var APP_VERSION='1.4';
+function holdsSVG(holds,sel,edit){
+  var w=state.wall,H=100*w.h/w.w,m='',s='';
+  holds.forEach(function(h){m+='<circle cx="'+h.x+'" cy="'+h.y+'" r="'+((h.r||3.4)+0.4)+'" fill="#000"/>'});
+  s+='<defs><mask id="hm" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="'+H+'"><rect x="0" y="0" width="100" height="'+H+'" fill="#fff"/>'+m+'</mask></defs>'+
+     '<rect x="0" y="0" width="100" height="'+H+'" fill="#000" fill-opacity="'+(edit?.25:.45)+'" mask="url(#hm)"/>';
+  holds.forEach(function(h){s+=ring(h,h.id===sel)});
+  return s;
+}
+var APP_VERSION='1.4.1';
 function PH(w,h){return 'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'"/>')}
 function wallHTML(holds,editMode,sel){
   var w=state.wall,vb='0 0 100 '+(100*w.h/w.w);
-  return '<div class="stage'+(editMode?' edit':'')+'" id="stage"><div class="zoom" id="zoom" style="background:url(\''+w.photo+'\') 0 0/100% 100% no-repeat"><img src="'+PH(w.w,w.h)+'" alt="Foto der Homewall" draggable="false"><div class="dim"></div><svg id="ov" viewBox="'+vb+'" preserveAspectRatio="none">'+holdsSVG(holds,editMode?sel:null)+'</svg></div>'+
+  return '<div class="stage'+(editMode?' edit':'')+'" id="stage"><div class="zoom" id="zoom" style="background:url(\''+w.photo+'\') 0 0/100% 100% no-repeat"><img src="'+PH(w.w,w.h)+'" alt="Foto der Homewall" draggable="false"><svg id="ov" viewBox="'+vb+'" preserveAspectRatio="none">'+holdsSVG(holds,editMode?sel:null,editMode)+'</svg></div>'+
   '<div class="zctl"><button class="zb" id="zin" aria-label="Foto vergrößern">+</button><button class="zb" id="zout" aria-label="Foto verkleinern">&minus;</button><button class="zb" id="zreset" aria-label="Zoom zurücksetzen" style="font-size:13px">1&times;</button></div></div>';
 }
 function legend(){return '<div class="legend"><span>'+dot('start')+'Start/Ziel</span><span>'+dot('hand')+'Hand</span><span>'+dot('foot')+'Fuß</span></div>';}
@@ -674,7 +679,7 @@ function hintText(a){
 function paintEdit(){
   var d=state.draft,ov=document.getElementById('ov');if(!d||!ov)return;
   var a=selHold();
-  ov.innerHTML=holdsSVG(d.holds,state.sel);
+  ov.innerHTML=holdsSVG(d.holds,state.sel,true);
   [].forEach.call(document.querySelectorAll('.bt'),function(b){
     var t=b.dataset.t,on=a?a.t===t:state.tool===t;
     b.setAttribute('aria-pressed',on?'true':'false');
