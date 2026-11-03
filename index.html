@@ -124,7 +124,7 @@ var GRADES=[1,2,3,4,5,6,7,8,9,10];
 var COL={start:'var(--c-start)',hand:'var(--c-hand)',foot:'var(--c-foot)'};
 var LABEL={start:'Start/Ziel',hand:'Hand',foot:'Fuß'};
 var state={wall:null,boulders:[],legacyB:[],legacy:null,me:'',view:'list',cur:null,draft:null,sel:null,tool:'start',r:3.4,
-  f:{gmin:1,gmax:10,st:'all',mk:'all'},persist:true,err:'',code:'',role:'',share:'',device:'',loading:true,offline:false,busy:false,stale:false,z:{s:1,x:0,y:0}};
+  f:{gmin:1,gmax:10,st:'all',mk:'all',sort:'grade'},lastBackup:0,snooze:0,imp:null,persist:true,err:'',code:'',role:'',share:'',device:'',loading:true,offline:false,busy:false,stale:false,z:{s:1,x:0,y:0}};
 
 /* ---------- Supabase (public values; protection lives in the database rules) ---------- */
 var SB_URL='https://ldangrtzwevbkeotkcmi.supabase.co';
@@ -216,7 +216,7 @@ function ring(h,sel){ /* round ring, no outline; pending circles are filled and 
   return o;
 }
 function holdsSVG(holds,sel){var s='';holds.forEach(function(h){s+=ring(h,h.id===sel)});return s;}
-var APP_VERSION='1.2';
+var APP_VERSION='1.3';
 function PH(w,h){return 'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'"/>')}
 function wallHTML(holds,editMode,sel){
   var w=state.wall,vb='0 0 100 '+(100*w.h/w.w);
@@ -419,9 +419,64 @@ function ownerPanel(){
   return '<div class="card" style="padding:14px;display:flex;flex-direction:column;gap:14px"><h2>Besitzer</h2>'+
   '<div class="field"><label for="sl">Teilen-Link für Freunde</label><input type="text" id="sl" readonly value="'+esc(sl)+'"><button class="btn" id="cps">Teilen-Link kopieren</button></div>'+
   '<div class="field"><label for="ol">Dein Besitzer-Link (geheim)</label><input type="text" id="ol" readonly value="'+esc(ol)+'"><button class="btn" id="cpo">Besitzer-Link kopieren</button><span class="note">Schicke ihn dir per E-Mail und speichere ihn als Lesezeichen. Nicht weitergeben.</span></div>'+
+  backupPanel()+
   '<div class="field"><button class="btn danger" id="rot">Teilen-Link erneuern</button><span class="note">Alle bisherigen Teilen-Links werden sofort ungültig.</span></div></div>';
 }
+function ago(ts){
+  if(!ts)return 'noch nie (auf diesem Gerät)';
+  var d=Math.floor((Date.now()-ts)/86400000);
+  return d<1?'heute':'vor '+d+(d===1?' Tag':' Tagen');
+}
+function backupPanel(){
+  var im=state.imp,h='<div class="field"><label>Sicherung</label><span class="muted">Letztes Backup: '+ago(state.lastBackup)+'</span><button class="btn" id="bkdl">Backup herunterladen</button>'+
+  '<label class="btn" for="fimp" tabindex="0">Backup einspielen …</label><input type="file" id="fimp" accept=".json,application/json" class="vh">';
+  if(im){
+    h+='<div class="card" style="padding:12px;display:flex;flex-direction:column;gap:10px"><b>Wand komplett ersetzen?</b><span class="muted">Jetzt in der Wand: '+state.boulders.length+' Boulder. In der Datei: '+im.n+' Boulder'+(im.date?' (Sicherung vom '+esc(im.date)+')':'')+'. Foto, Boulder, Sendestatus, Kommentare und Markierungen werden ersetzt. Das lässt sich nicht rückgängig machen.</span>'+
+    '<div class="row"><button class="btn danger" id="impgo"'+(state.busy?' disabled':'')+'>Wand ersetzen</button><button class="btn" id="impno">Abbrechen</button></div></div>';
+  }
+  return h+'<span class="note">Die Datei enthält das Wandfoto und alle Daten, aber keine Links. Bewahre sie sicher auf (Cloud-Ordner oder E-Mail an dich).</span></div>';
+}
+function doBackup(){
+  if(!state.wall||!state.wall.photo){state.err='Das Wandfoto ist noch nicht geladen. Bitte kurz warten und erneut versuchen.';return render()}
+  var data={format:'homewall-backup',version:1,exported:new Date().toISOString(),app:APP_VERSION,
+    wall:{photo:state.wall.photo,width:state.wall.w,height:state.wall.h},
+    boulders:state.boulders.map(function(b){return {id:b.id,name:b.name,grade:b.grade,holds:b.holds,author:b.author,dev:b.dev,sent:b.sent||{},comments:b.comments||[],marks:b.marks||{}}})};
+  var blob=new Blob([JSON.stringify(data)],{type:'application/json'});
+  var a=document.createElement('a'),d=new Date(),p=function(x){return (x<10?'0':'')+x};
+  a.href=URL.createObjectURL(blob);a.download='homewall-backup-'+d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'.json';
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},4000);
+  state.lastBackup=Date.now();state.snooze=0;kvSet('lastBackup',state.lastBackup);kvSet('backupSnooze',0);
+  state.err='';render();
+}
+function readBackup(file){
+  var rd=new FileReader();
+  rd.onerror=function(){state.err='Die Datei konnte nicht gelesen werden.';render()};
+  rd.onload=function(){
+    try{
+      var d=JSON.parse(rd.result);
+      if(!d||d.format!=='homewall-backup'||!Array.isArray(d.boulders)||!d.wall||typeof d.wall.photo!=='string'||d.wall.photo.indexOf('data:image/jpeg;base64,')!==0)throw 0;
+      state.imp={data:d,n:d.boulders.length,date:d.exported?fmt(d.exported):''};state.err='';
+    }catch(e){state.imp=null;state.err='Das ist keine gültige Homewall-Sicherung.'}
+    render();
+  };
+  rd.readAsText(file);
+}
+function doImport(){
+  var im=state.imp;if(!im||state.busy)return;
+  state.busy=true;state.err='Wand wird wiederhergestellt …';render();
+  rpc('import_all',{p_code:state.code,p_data:im.data}).then(function(r){
+    if(!r||!r.ok)throw new Error(r&&r.error==='forbidden'?'Nur mit dem Besitzer-Link möglich.':'Der Server hat die Sicherung abgelehnt.');
+    state.imp=null;state.wall=null;state.cur=null;
+    return loadRemote().then(reload).then(function(){state.busy=false;state.err='Fertig: '+r.boulders+' Boulder wiederhergestellt.';render()});
+  }).catch(function(e){state.imp=null;fail(e)});
+}
 function wireOwner(){
+  document.getElementById('bkdl').onclick=doBackup;
+  document.getElementById('fimp').onchange=function(e){var f=e.target.files&&e.target.files[0];if(f)readBackup(f);e.target.value=''};
+  var go=document.getElementById('impgo');if(go){go.onclick=doImport;document.getElementById('impno').onclick=function(){state.imp=null;render()}}
+  var bn=document.getElementById('bknow'),bl=document.getElementById('bklater');
+  if(bn){bn.onclick=doBackup;bl.onclick=function(){state.snooze=Date.now()+7*86400000;kvSet('backupSnooze',state.snooze);render()}}
   document.getElementById('cps').onclick=function(){copyFrom('sl',this)};
   document.getElementById('cpo').onclick=function(){copyFrom('ol',this)};
   document.getElementById('rot').onclick=function(){
@@ -459,13 +514,26 @@ function filtered(){
     if(f.mk==='fav'&&!myMark(b).f)return false;
     if(f.mk==='proj'&&!myMark(b).p)return false;
     return true;
-  }).sort(function(a,b){return a.grade-b.grade||a.name.localeCompare(b.name)});
+  }).sort(sorter(f.sort));
+}
+function sorter(k){
+  var all=state.boulders;
+  function ci(b){return all.indexOf(b)}
+  function gn(a,b){return a.grade-b.grade||a.name.localeCompare(b.name)}
+  if(k==='gradedesc')return function(a,b){return b.grade-a.grade||a.name.localeCompare(b.name)};
+  if(k==='new')return function(a,b){return ci(b)-ci(a)};
+  if(k==='old')return function(a,b){return ci(a)-ci(b)};
+  if(k==='stars')return function(a,b){var x=avg(a,'s'),y=avg(b,'s');return (y?y.v:0)-(x?x.v:0)||gn(a,b)};
+  return gn;
 }
 function gradeOpts(sel){return GRADES.map(function(g){return '<option value="'+g+'"'+(g===sel?' selected':'')+'>'+g+'</option>'}).join('')}
 
 function viewList(){
   var bs=filtered(),all=state.boulders.length,f=state.f;
   var h=top('Homewall','<button class="btn primary" id="new"'+(state.offline?' disabled':'')+'>+ Boulder</button>');
+  if(state.role==='owner'&&state.boulders.length&&!state.offline&&Date.now()>(state.snooze||0)&&(!state.lastBackup||Date.now()-state.lastBackup>90*86400000)){
+    h+='<div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:10px"><b>Zeit für ein Backup</b><span class="muted">Letztes Backup: '+ago(state.lastBackup)+'. Die Datei schützt Boulder, Kommentare und Foto vor Verlust.</span><div class="row"><button class="btn primary" id="bknow">Jetzt sichern</button><button class="btn" id="bklater">Später</button></div></div>';
+  }
   h+='<div class="field"><label for="me">Dein Name (für Boulder, „gesendet“ und Kommentare)</label><input type="text" id="me" maxlength="30" placeholder="z. B. Robert" value="'+esc(state.me)+'"></div>';
   if(state.legacyB.length&&!state.offline){
     h+='<div class="card empty"><h2>Alte Boulder auf diesem Gerät</h2><p class="muted" style="margin:0">Es liegen noch '+state.legacyB.length+' Boulder aus der lokalen Version auf diesem Gerät. Sie sind für andere unsichtbar.</p><div class="row"><button class="btn primary" id="mig">In die Cloud übernehmen</button><button class="btn" id="migdel">Verwerfen</button></div></div>';
@@ -479,6 +547,7 @@ function viewList(){
       '<div class="field"><label for="g2">bis</label><select id="g2">'+gradeOpts(f.gmax)+'</select></div>'+
       '<div class="field"><label for="st">Status</label><select id="st"><option value="all"'+(f.st==='all'?' selected':'')+'>Alle</option><option value="open"'+(f.st==='open'?' selected':'')+'>Offen</option><option value="sent"'+(f.st==='sent'?' selected':'')+'>Gesendet</option></select></div>'+
       '<div class="field"><label for="mk">Merken</label><select id="mk"><option value="all"'+(f.mk==='all'?' selected':'')+'>Alle</option><option value="fav"'+(f.mk==='fav'?' selected':'')+'>Favoriten</option><option value="proj"'+(f.mk==='proj'?' selected':'')+'>Projekte</option></select></div>'+
+      '<div class="field" style="grid-column:1/-1"><label for="so">Sortierung</label><select id="so">'+[['grade','Grad: leicht zuerst'],['gradedesc','Grad: schwer zuerst'],['new','Neueste zuerst'],['old','Älteste zuerst'],['stars','Beste Sterne zuerst']].map(function(o){return '<option value="'+o[0]+'"'+(f.sort===o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select></div>'+
       '</div>'+
       '<div class="row"><span class="muted grow">'+bs.length+' von '+all+' Boulder · '+done+' von dir gesendet</span>'+(active?'<button class="btn" id="reset">Filter zurücksetzen</button>':'')+'</div>';
     if(!bs.length)h+='<div class="card empty"><p class="muted" style="margin:0">Kein Boulder passt zum Filter.</p></div>';
@@ -519,6 +588,7 @@ function viewList(){
     document.getElementById('g2').onchange=function(e){f.gmax=+e.target.value;if(f.gmin>f.gmax)f.gmin=f.gmax;render()};
     document.getElementById('st').onchange=function(e){f.st=e.target.value;render()};
     document.getElementById('mk').onchange=function(e){f.mk=e.target.value;render()};
+    document.getElementById('so').onchange=function(e){f.sort=e.target.value;kvSet('sort',f.sort);render()};
     var rs=document.getElementById('reset');if(rs)rs.onclick=function(){f.gmin=1;f.gmax=10;f.st='all';f.mk='all';render()};
   }
   [].forEach.call(APP.querySelectorAll('.item'),function(el){el.onclick=function(){
@@ -749,10 +819,10 @@ document.addEventListener('visibilitychange',function(){if(!document.hidden)soft
 window.addEventListener('online',softRefresh);
 
 /* ---------- boot ---------- */
-openDB().then(function(){return Promise.all([kvGet('wallRemote'),kvGet('wall'),kvGet('boulders'),kvGet('me'),kvGet('r'),kvGet('code'),kvGet('cloudBoulders'),kvGet('device')])}).then(function(v){
+openDB().then(function(){return Promise.all([kvGet('wallRemote'),kvGet('wall'),kvGet('boulders'),kvGet('me'),kvGet('r'),kvGet('code'),kvGet('cloudBoulders'),kvGet('device'),kvGet('lastBackup'),kvGet('backupSnooze'),kvGet('sort')])}).then(function(v){
   var hash=(location.hash||'').replace(/^#/,'').replace(/[^A-Za-z0-9]/g,'');
   state.wall=v[0]||null;state.legacy=v[1]||null;state.legacyB=v[2]||[];state.me=v[3]||'';state.r=v[4]||3.4;
-  state.boulders=v[6]||[];
+  state.boulders=v[6]||[];state.lastBackup=v[8]||0;state.snooze=v[9]||0;if(v[10])state.f.sort=v[10];
   state.device=v[7]||(uid()+uid());if(!v[7])kvSet('device',state.device);
   if(hash.length>=32){state.code=hash;kvSet('code',hash)}else state.code=v[5]||'';
   try{history.replaceState({},'')}catch(e){}
