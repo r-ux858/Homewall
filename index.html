@@ -100,6 +100,13 @@ input[type=text],select{min-height:44px;border-radius:10px;border:1px solid var(
 .sb{width:46px;height:46px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-size:24px;line-height:1;color:var(--muted);cursor:pointer;padding:0}
 .sb.on{color:#f5b301;border-color:#f5b301}
 .sb[disabled]{opacity:.4}
+.dim{position:absolute;inset:0;background:#000;opacity:.45;pointer-events:none}
+.stage.edit .dim{opacity:.25}
+.more>summary{cursor:pointer;font-weight:600;min-height:44px;display:flex;align-items:center;list-style:none}
+.more>summary::-webkit-details-marker{display:none}
+.more>summary::before{content:'▸';margin-right:8px;display:inline-block;transition:transform .15s}
+.more[open]>summary::before{transform:rotate(90deg)}
+.more[open]>summary{margin-bottom:6px}
 .mi{font-size:13px;color:var(--muted);white-space:nowrap}
 .filters .field label{font-size:12px}
 .size{display:flex;align-items:center;gap:12px}
@@ -124,7 +131,7 @@ var GRADES=[1,2,3,4,5,6,7,8,9,10];
 var COL={start:'var(--c-start)',hand:'var(--c-hand)',foot:'var(--c-foot)'};
 var LABEL={start:'Start/Ziel',hand:'Hand',foot:'Fuß'};
 var state={wall:null,boulders:[],legacyB:[],legacy:null,me:'',view:'list',cur:null,draft:null,sel:null,tool:'start',r:3.4,
-  f:{gmin:1,gmax:10,st:'all',mk:'all',sort:'grade'},lastBackup:0,snooze:0,imp:null,persist:true,err:'',code:'',role:'',share:'',device:'',loading:true,offline:false,busy:false,stale:false,z:{s:1,x:0,y:0}};
+  f:{gmin:1,gmax:10,st:'all',mk:'all',sort:'grade'},lastBackup:0,snooze:0,imp:null,ownOpen:false,persist:true,err:'',code:'',role:'',share:'',device:'',loading:true,offline:false,busy:false,stale:false,z:{s:1,x:0,y:0}};
 
 /* ---------- Supabase (public values; protection lives in the database rules) ---------- */
 var SB_URL='https://ldangrtzwevbkeotkcmi.supabase.co';
@@ -216,11 +223,11 @@ function ring(h,sel){ /* round ring, no outline; pending circles are filled and 
   return o;
 }
 function holdsSVG(holds,sel){var s='';holds.forEach(function(h){s+=ring(h,h.id===sel)});return s;}
-var APP_VERSION='1.3';
+var APP_VERSION='1.4';
 function PH(w,h){return 'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'"/>')}
 function wallHTML(holds,editMode,sel){
   var w=state.wall,vb='0 0 100 '+(100*w.h/w.w);
-  return '<div class="stage'+(editMode?' edit':'')+'" id="stage"><div class="zoom" id="zoom" style="background:url(\''+w.photo+'\') 0 0/100% 100% no-repeat"><img src="'+PH(w.w,w.h)+'" alt="Foto der Homewall" draggable="false"><svg id="ov" viewBox="'+vb+'" preserveAspectRatio="none">'+holdsSVG(holds,editMode?sel:null)+'</svg></div>'+
+  return '<div class="stage'+(editMode?' edit':'')+'" id="stage"><div class="zoom" id="zoom" style="background:url(\''+w.photo+'\') 0 0/100% 100% no-repeat"><img src="'+PH(w.w,w.h)+'" alt="Foto der Homewall" draggable="false"><div class="dim"></div><svg id="ov" viewBox="'+vb+'" preserveAspectRatio="none">'+holdsSVG(holds,editMode?sel:null)+'</svg></div>'+
   '<div class="zctl"><button class="zb" id="zin" aria-label="Foto vergrößern">+</button><button class="zb" id="zout" aria-label="Foto verkleinern">&minus;</button><button class="zb" id="zreset" aria-label="Zoom zurücksetzen" style="font-size:13px">1&times;</button></div></div>';
 }
 function legend(){return '<div class="legend"><span>'+dot('start')+'Start/Ziel</span><span>'+dot('hand')+'Hand</span><span>'+dot('foot')+'Fuß</span></div>';}
@@ -390,6 +397,7 @@ function nav(view){
   }
   try{history.pushState({hw:view},'')}catch(e){}
   state.view=view;render();
+  if(view==='show')window.scrollTo(0,0);
 }
 window.addEventListener('popstate',function(e){
   var h=e.state&&e.state.hw;state.err='';state.z={s:1,x:0,y:0};
@@ -416,11 +424,14 @@ function copyFrom(id,btn){
 }
 function ownerPanel(){
   var base=location.origin+location.pathname,sl=base+'#'+state.share,ol=base+'#'+state.code;
+  var photo=photoButtons(false).replace('Foto aufnehmen','Wandfoto neu aufnehmen').replace('Aus Galerie wählen','Wandfoto aus Galerie');
   return '<div class="card" style="padding:14px;display:flex;flex-direction:column;gap:14px"><h2>Besitzer</h2>'+
   '<div class="field"><label for="sl">Teilen-Link für Freunde</label><input type="text" id="sl" readonly value="'+esc(sl)+'"><button class="btn" id="cps">Teilen-Link kopieren</button></div>'+
+  '<details class="more" id="own"'+((state.ownOpen||state.imp)?' open':'')+'><summary>Weitere Besitzer-Einstellungen</summary><div style="display:flex;flex-direction:column;gap:14px">'+
   '<div class="field"><label for="ol">Dein Besitzer-Link (geheim)</label><input type="text" id="ol" readonly value="'+esc(ol)+'"><button class="btn" id="cpo">Besitzer-Link kopieren</button><span class="note">Schicke ihn dir per E-Mail und speichere ihn als Lesezeichen. Nicht weitergeben.</span></div>'+
+  '<div class="field"><label>Wandfoto</label><div class="row">'+photo+'</div><span class="note">Beim Wechsel des Wandfotos passen vorhandene Boulder nicht mehr zum neuen Foto.</span></div>'+
   backupPanel()+
-  '<div class="field"><button class="btn danger" id="rot">Teilen-Link erneuern</button><span class="note">Alle bisherigen Teilen-Links werden sofort ungültig.</span></div></div>';
+  '<div class="field"><button class="btn danger" id="rot">Teilen-Link erneuern</button><span class="note">Alle bisherigen Teilen-Links werden sofort ungültig.</span></div></div></details></div>';
 }
 function ago(ts){
   if(!ts)return 'noch nie (auf diesem Gerät)';
@@ -472,6 +483,7 @@ function doImport(){
   }).catch(function(e){state.imp=null;fail(e)});
 }
 function wireOwner(){
+  document.getElementById('own').ontoggle=function(){state.ownOpen=this.open};
   document.getElementById('bkdl').onclick=doBackup;
   document.getElementById('fimp').onchange=function(e){var f=e.target.files&&e.target.files[0];if(f)readBackup(f);e.target.value=''};
   var go=document.getElementById('impgo');if(go){go.onclick=doImport;document.getElementById('impno').onclick=function(){state.imp=null;render()}}
@@ -560,7 +572,7 @@ function viewList(){
     }
   }
   if(state.role==='owner'){
-    h+='<div class="row">'+(photoButtons(false).replace('Foto aufnehmen','Wandfoto neu aufnehmen').replace('Aus Galerie wählen','Wandfoto aus Galerie'))+'</div><p class="note">Beim Wechsel des Wandfotos passen vorhandene Boulder nicht mehr zum neuen Foto.</p>'+ownerPanel();
+    h+=ownerPanel();
   }
   h+='<p class="note">Grad 1 bis 10. Wandfoto, Boulder, Sendestatus und Kommentare liegen in der Cloud und sind für alle mit Teilen-Link sichtbar. Die Liste aktualisiert sich alle 30 Sekunden. <span class="ver">Version '+APP_VERSION+'</span></p>';
   APP.innerHTML=h;
